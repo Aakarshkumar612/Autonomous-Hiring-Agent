@@ -1,0 +1,25 @@
+# Environment variables
+.env
+.env.local
+.env.production
+.env.*
+
+# Python
+__pycache__/
+*.py[oc]
+*.egg-info/
+
+# Build artifacts
+build/
+dist/
+wheels/
+
+# Virtual environments
+.venv/
+
+# Logs
+logs/
+
+# OS
+.DS_Store
+Thumbs.db

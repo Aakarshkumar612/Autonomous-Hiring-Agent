@@ -1,0 +1,69 @@
+# ─── Python ───────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+*.pyo
+*.pyd
+
+# ─── Virtual Environments ─────────────────────────────
+.venv/
+venv/
+env/
+.env/
+ENV/
+
+# ─── Environment Variables (NEVER COMMIT THESE) ───────
+.env
+.env.local
+.env.production
+.env.staging
+hiring-agent/.env
+
+# ─── uv ───────────────────────────────────────────────
+.uv/
+uv.lock
+
+# ─── IDE / Editor ─────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ─── Logs ─────────────────────────────────────────────
+*.log
+logs/
+hiring-agent/logs/
+
+# ─── ChromaDB / Vector stores ─────────────────────────
+chroma_data/
+hiring-agent/chroma_data/
+
+# ─── Node.js (for frontend) ───────────────────────────
+node_modules/
+frontend/node_modules/
+.next/
+frontend/.next/
+.npm
+frontend/.env.local
+
+# ─── Claude / AI tooling ──────────────────────────────
+.claude/
+
+# ─── Test artifacts ───────────────────────────────────
+.pytest_cache/
+htmlcov/
+.coverage
+*.cover
+
+# ─── OS ───────────────────────────────────────────────
+.DS_Store
+*.tmp
+*.bak
