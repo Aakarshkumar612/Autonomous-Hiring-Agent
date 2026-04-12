@@ -113,8 +113,8 @@ SUPABASE_KEY=your_supabase_service_role_key
 - ✅ All agents working (Groq API)
 - ✅ Supabase connected
 - ✅ CSV ingest pipeline working
-- 🔄 Frontend (Next.js) — in progress
-- 🔄 RAG feedback agent — planned
+- ✅ Frontend (Next.js) — in progress
+- ✅ RAG feedback agent — planned
 - 🔄 AWS S3 + EC2 deployment — planned
 
 ---
