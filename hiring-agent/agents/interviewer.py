@@ -52,8 +52,8 @@ from utils.prompt_templates import (
 )
 from utils.rate_limiter import DailyLimitExceededError, rate_limiter, with_retry
 
-INTERVIEWER_MODEL   = "meta-llama/llama-4-maverick-17b-128e-instruct"
-QUESTIONS_PER_ROUND = 5
+INTERVIEWER_MODEL   = os.getenv("GROQ_INTERVIEWER", "meta-llama/llama-4-maverick-17b-128e-instruct")
+QUESTIONS_PER_ROUND = int(os.getenv("INTERVIEW_QUESTIONS_PER_ROUND", "5"))
 MIN_RESPONSE_WORDS  = 20
 
 # Default question category per round

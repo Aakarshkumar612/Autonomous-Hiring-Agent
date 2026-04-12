@@ -40,7 +40,7 @@ from utils.logger import logger
 from utils.prompt_templates import LEARNER_SYSTEM, learner_analysis_prompt
 from utils.rate_limiter import DailyLimitExceededError, rate_limiter, with_retry
 
-LEARNER_MODEL = "deepseek-r1-distill-qwen-32b"
+LEARNER_MODEL = os.getenv("GROQ_LEARNER", "deepseek-r1-distill-qwen-32b")
 
 
 # ─────────────────────────────────────────────────────
@@ -104,8 +104,8 @@ class LearnerAgent:
                 {"role": "system", "content": LEARNER_SYSTEM},
                 {"role": "user",   "content": prompt},
             ],
-            temperature=0.6,      # reasoning model needs flexibility
-            max_tokens=2000,      # deep analysis needs room to think
+            temperature=0.0,      # deterministic — same data must produce same recommendations
+            max_tokens=900,       # JSON with 3-5 recommendations fits well under this
             response_format={"type": "json_object"},
         )
         return response.choices[0].message.content.strip()

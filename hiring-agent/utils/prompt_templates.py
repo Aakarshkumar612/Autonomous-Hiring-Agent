@@ -130,7 +130,7 @@ Cover Letter:
 {cover_letter or 'Not provided'}
 
 Resume Summary:
-{resume_text[:1000] if resume_text else 'Not provided'}
+{resume_text[:500] if resume_text else 'Not provided'}
 
 === INSTRUCTIONS ===
 Score each dimension from 0-100.

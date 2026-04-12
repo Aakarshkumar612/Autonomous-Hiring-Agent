@@ -1,0 +1,46 @@
+# ════════════════════════════════════════════════════════════════
+#   HireIQ Frontend (frontend/) — .gitignore
+# ════════════════════════════════════════════════════════════════
+
+
+# ── SECRETS (NEVER COMMIT) ───────────────────────────────────────
+.env
+.env.local
+.env.production
+.env.staging
+.env.development
+.env.test
+.env.*
+!.env.local.example
+
+
+# ── NEXT.JS BUILD OUTPUT ─────────────────────────────────────────
+.next/
+out/
+
+
+# ── DEPENDENCIES ─────────────────────────────────────────────────
+node_modules/
+.npm
+.yarn/
+.pnp
+.pnp.js
+
+
+# ── TYPESCRIPT ───────────────────────────────────────────────────
+*.tsbuildinfo
+next-env.d.ts
+
+
+# ── OS / EDITOR ──────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+
+# ── MISC ─────────────────────────────────────────────────────────
+*.tmp
+*.bak

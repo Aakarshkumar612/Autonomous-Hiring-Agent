@@ -17,6 +17,7 @@ dependencies = [
     # ── Resume Parsing ────────────────────────────
     "pymupdf>=1.24.0",            # PDF parsing (fast & accurate)
     "python-docx>=1.1.0",         # DOCX resume support
+    "Pillow>=10.0.0",             # Image resize/normalise before sending to Groq vision
     # ── CSV Ingestion ─────────────────────────────
     "pandas>=2.2.0",
     "openpyxl>=3.1.0",            # Excel support for CSV ingestor
@@ -25,9 +26,8 @@ dependencies = [
     # ── PageIndex (vectorless reasoning-based RAG) ─
     "pageindex>=0.2.6",
     # ── AI & Plagiarism Detection ─────────────────
-    "transformers>=4.41.0",
-    "torch>=2.4.0",
-    "accelerate>=0.30.0",
+    # Handled by Groq (llama-3.1-8b-instant) — local torch/transformers
+    # removed (~500 MB saved, no active usage in codebase).
     # ── Data Validation & Processing ──────────────
     "pydantic>=2.7.0",
     "pydantic-settings>=2.2.0",
@@ -66,6 +66,9 @@ packages = [
     "memory",
     "utils",
 ]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
 
 [build-system]
 requires = ["hatchling"]

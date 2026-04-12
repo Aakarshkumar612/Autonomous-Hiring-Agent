@@ -1,0 +1,21 @@
+{
+  "name": "hireiq-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "HireIQ Autonomous Hiring Agent — Frontend (Next.js :3000) + Backend (FastAPI :8000)",
+  "scripts": {
+    "dev": "concurrently --kill-others --raw -n BACKEND,FRONTEND -c green,cyan \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:frontend": "cd frontend && npm run dev",
+    "dev:backend": "cd hiring-agent && uv run uvicorn main:app --reload --host 0.0.0.0 --port 8000",
+    "build": "cd frontend && npm run build",
+    "start": "concurrently --kill-others --raw -n BACKEND,FRONTEND -c green,cyan \"npm run start:backend\" \"npm run start:frontend\"",
+    "start:frontend": "cd frontend && npm run start",
+    "start:backend": "cd hiring-agent && uv run uvicorn main:app --host 0.0.0.0 --port 8000",
+    "install:all": "npm install && cd frontend && npm install",
+    "lint": "cd frontend && npm run lint",
+    "test": "cd hiring-agent && uv run pytest"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

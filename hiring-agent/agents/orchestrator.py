@@ -41,7 +41,7 @@ from utils.logger import logger
 from utils.prompt_templates import ORCHESTRATOR_SYSTEM, orchestrator_decision_prompt
 from utils.rate_limiter import DailyLimitExceededError, rate_limiter, with_retry
 
-ORCHESTRATOR_MODEL = "llama-3.3-70b-versatile"
+ORCHESTRATOR_MODEL = os.getenv("GROQ_ORCHESTRATOR", "llama-3.3-70b-versatile")
 
 
 # ─────────────────────────────────────────────────────
@@ -100,8 +100,8 @@ class OrchestratorAgent:
                 {"role": "system", "content": ORCHESTRATOR_SYSTEM},
                 {"role": "user",   "content": prompt},
             ],
-            temperature=0.1,
-            max_tokens=300,
+            temperature=0.0,   # deterministic — verdict must be reproducible
+            max_tokens=300,    # small JSON verdict object, 300 is correct
             response_format={"type": "json_object"},
         )
         return response.choices[0].message.content.strip()

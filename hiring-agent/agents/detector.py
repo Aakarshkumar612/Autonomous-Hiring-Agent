@@ -31,7 +31,7 @@ from utils.logger import logger
 from utils.prompt_templates import DETECTOR_SYSTEM, detector_prompt
 from utils.rate_limiter import DailyLimitExceededError, rate_limiter, with_retry
 
-DETECTOR_MODEL       = "llama-3.1-8b-instant"
+DETECTOR_MODEL       = os.getenv("GROQ_DETECTOR", "llama-3.1-8b-instant")
 _DEFAULT_THRESHOLD   = 0.75
 
 

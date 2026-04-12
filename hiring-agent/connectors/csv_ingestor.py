@@ -183,7 +183,9 @@ def _fix_url(url: Optional[str]) -> Optional[str]:
     if not url:
         return None
     url = url.strip()
-    if url and not url.startswith(("http://", "https://")):
+    if not url:
+        return None
+    if not url.startswith(("http://", "https://")):
         url = "https://" + url
     return url
 

@@ -1,69 +1,153 @@
-# ─── Python ───────────────────────────────────────────
+# ════════════════════════════════════════════════════════════════
+#   HireIQ Monorepo — Root .gitignore
+#   Covers: Python backend, Next.js frontend, monorepo tooling
+# ════════════════════════════════════════════════════════════════
+
+
+# ── SECRETS & ENV FILES (NEVER COMMIT) ──────────────────────────
+.env
+.env.local
+.env.production
+.env.staging
+.env.development
+.env.test
+.env.*
+!.env.example
+!.env.local.example
+hiring-agent/.env
+hiring-agent/.env.*
+!hiring-agent/.env.example
+frontend/.env.local
+frontend/.env.*
+!frontend/.env.local.example
+
+
+# ── LOGS (contain applicant PII — names, scores, transcripts) ───
+logs/
+*.log
+*.log.zip
+*.log.gz
+hiring-agent/logs/
+
+
+# ── PYTHON ──────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
+*.pyo
+*.pyd
 *.egg
 *.egg-info/
 dist/
 build/
 .eggs/
-*.pyo
-*.pyd
+wheels/
+MANIFEST
 
-# ─── Virtual Environments ─────────────────────────────
+
+# ── PYTHON VIRTUAL ENVIRONMENTS ─────────────────────────────────
 .venv/
 venv/
 env/
-.env/
 ENV/
+.env/
+hiring-agent/.venv/
 
-# ─── Environment Variables (NEVER COMMIT THESE) ───────
-.env
-.env.local
-.env.production
-.env.staging
-hiring-agent/.env
 
-# ─── uv ───────────────────────────────────────────────
-.uv/
-uv.lock
+# ── PYTHON TOOLING ──────────────────────────────────────────────
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+*.cover
+.mypy_cache/
+.ruff_cache/
+.pytype/
+.dmypy.json
+dmypy.json
 
-# ─── IDE / Editor ─────────────────────────────────────
-.vscode/
-.idea/
-*.swp
-*.swo
-.DS_Store
-Thumbs.db
 
-# ─── Logs ─────────────────────────────────────────────
-*.log
-logs/
-hiring-agent/logs/
-
-# ─── ChromaDB / Vector stores ─────────────────────────
-chroma_data/
-hiring-agent/chroma_data/
-
-# ─── Node.js (for frontend) ───────────────────────────
+# ── NODE / NEXT.JS ──────────────────────────────────────────────
 node_modules/
 frontend/node_modules/
 .next/
 frontend/.next/
+out/
+frontend/out/
 .npm
-frontend/.env.local
+.yarn/
+.pnp
+.pnp.js
 
-# ─── Claude / AI tooling ──────────────────────────────
+
+# ── BUILD ARTIFACTS ─────────────────────────────────────────────
+dist/
+build/
+*.tsbuildinfo
+frontend/next-env.d.ts
+
+
+# ── INTERNAL / DESIGN EXPORTS ───────────────────────────────────
+# These are internal working files, not meant for the public repo
+stitch-exports/
+system-design.html
+project_handoff_context.md
+PROJECT_CONTEXT.md
+
+
+# ── AI TOOLING ──────────────────────────────────────────────────
 .claude/
 
-# ─── Test artifacts ───────────────────────────────────
-.pytest_cache/
-htmlcov/
-.coverage
-*.cover
 
-# ─── OS ───────────────────────────────────────────────
+# ── DATABASES / VECTOR STORES ───────────────────────────────────
+*.db
+*.sqlite
+*.sqlite3
+chroma_data/
+hiring-agent/chroma_data/
+faiss_index/
+
+
+# ── CERTIFICATES & KEYS ─────────────────────────────────────────
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cert
+*.der
+
+
+# ── OS ──────────────────────────────────────────────────────────
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+
+# ── EDITOR / IDE ─────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.history/
+
+
+# ── TEMP / MISC ──────────────────────────────────────────────────
 *.tmp
 *.bak
+*.orig
+*.rej
+*.patch
+tmp/
+temp/

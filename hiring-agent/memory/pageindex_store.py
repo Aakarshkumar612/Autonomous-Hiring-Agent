@@ -21,6 +21,7 @@ Usage:
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
@@ -29,6 +30,23 @@ from models.applicant import Applicant
 from models.interview import InterviewSession
 from models.score import ApplicantScore
 from utils.logger import logger
+
+
+# ─────────────────────────────────────────────────────
+#  Cap error
+# ─────────────────────────────────────────────────────
+
+class PageIndexCapError(Exception):
+    """
+    Raised when PageIndexStore refuses a new entry because the store
+    has reached its MAX_APPLICANTS capacity ceiling.
+
+    Why a dedicated exception class (not a generic ValueError):
+      - Callers (ingest pipeline, portal API) need to catch this
+        specific condition and return a 503 / log a cap warning,
+        not treat it as a generic bad-input error.
+      - Makes grep-based audits easy: search for PageIndexCapError.
+    """
 
 
 # ─────────────────────────────────────────────────────
@@ -125,9 +143,37 @@ class PageIndexStore:
     multi-process deployments (use Supabase for that).
     """
 
+    # Near-cap warning fires when the store reaches this fraction of the cap.
+    # 0.9 = warn at 900 of 1 000 so operators get advance notice.
+    _NEAR_CAP_RATIO: float = 0.9
+
     def __init__(self) -> None:
         self._profiles: dict[str, ApplicantProfile] = {}
-        logger.debug("PageIndexStore initialized (in-memory)")
+        # Read cap from env so operators can tune it without a code change.
+        # Defaults to 1 000 — in-memory reasoning RAG degrades above this.
+        self._cap: int = int(os.getenv("MAX_APPLICANTS", "1000"))
+        logger.debug(f"PageIndexStore initialized (in-memory, cap={self._cap})")
+
+    # ─────────────────────────────────────────────────
+    #  Cap helpers
+    # ─────────────────────────────────────────────────
+
+    @property
+    def cap(self) -> int:
+        """Maximum number of profiles this store will hold."""
+        return self._cap
+
+    def cap_usage_pct(self) -> float:
+        """Current fill level as a percentage (0–100)."""
+        return round(len(self._profiles) / self._cap * 100, 1) if self._cap else 0.0
+
+    def is_full(self) -> bool:
+        """True when the store has reached its cap and cannot accept new profiles."""
+        return len(self._profiles) >= self._cap
+
+    def is_near_cap(self) -> bool:
+        """True when the store has reached 90% of its cap — time to plan a scale-up."""
+        return len(self._profiles) >= int(self._cap * self._NEAR_CAP_RATIO)
 
     # ─────────────────────────────────────────────────
     #  Write operations
@@ -143,6 +189,33 @@ class PageIndexStore:
         Add or update an applicant profile in the index.
         Merges score and session data if provided.
         """
+        is_new = applicant.id not in self._profiles
+
+        # Enforce cap only for new entries — updates to existing profiles are always allowed.
+        # Why: refusing to update an existing profile would silently discard score/session
+        # data, which is worse than a slightly-over-cap store.
+        if is_new and self.is_full():
+            logger.error(
+                f"PageIndex | CAP REACHED ({self._cap}) | "
+                f"Refusing new profile for [{applicant.id}] {applicant.full_name}. "
+                f"Raise MAX_APPLICANTS env var or archive old applicants."
+            )
+            raise PageIndexCapError(
+                f"PageIndex is full ({self._cap} profiles). "
+                f"Cannot add [{applicant.id}] {applicant.full_name}. "
+                f"Increase MAX_APPLICANTS or clear old data."
+            )
+
+        # Near-cap warning — fires once per add when above 90% so operators
+        # get advance notice before the wall is hit.
+        if is_new and self.is_near_cap():
+            logger.warning(
+                f"PageIndex | NEAR CAP | "
+                f"{len(self._profiles)}/{self._cap} profiles "
+                f"({self.cap_usage_pct():.0f}% full). "
+                f"Consider raising MAX_APPLICANTS."
+            )
+
         profile = ApplicantProfile(
             applicant_id=applicant.id,
             full_name=applicant.full_name,
@@ -272,7 +345,7 @@ class PageIndexStore:
         return [p for p in self._profiles.values() if p.status == status]
 
     def stats(self) -> dict:
-        """Return summary statistics about the index."""
+        """Return summary statistics about the index, including cap health."""
         profiles = list(self._profiles.values())
         scored   = [p for p in profiles if p.score is not None]
         return {
@@ -283,4 +356,9 @@ class PageIndexStore:
             "rejected":      sum(1 for p in profiles if p.status == "rejected"),
             "pending":       sum(1 for p in profiles if p.status == "pending"),
             "ai_flagged":    sum(1 for p in profiles if p.ai_flags > 0),
+            # ── Cap health ───────────────────────────────────────────────
+            "cap":           self._cap,
+            "cap_usage_pct": self.cap_usage_pct(),
+            "is_near_cap":   self.is_near_cap(),
+            "is_full":       self.is_full(),
         }

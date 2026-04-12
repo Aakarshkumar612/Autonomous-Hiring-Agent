@@ -21,6 +21,7 @@ Strategy:
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -276,9 +277,9 @@ def sync_retry(
 
 async def batch_delay(
     batch_index: int,
-    delay_between_batches: float = 5.0,
+    delay_between_batches: float = float(os.getenv("BATCH_DELAY_SECONDS", "2.5")),
 ) -> None:
-    """Add a delay between batches to respect daily limits."""
+    """Add a delay between batches to respect Groq rate limits."""
     if batch_index > 0:
         logger.debug(
             f"Batch {batch_index} complete. "

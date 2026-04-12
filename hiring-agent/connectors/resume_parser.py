@@ -299,14 +299,23 @@ def extract_name_from_top(text: str) -> Optional[str]:
 class ResumeParser:
     """
     Main resume parser class.
-    Supports PDF, DOCX, and TXT files.
+    Supports PDF, DOCX, TXT, and image files (JPEG, PNG, WEBP).
+
+    For images the document_validator has already run OCR via the Groq
+    vision model and returns extracted_text in its ValidationResult.
+    parse_image() accepts that pre-extracted text directly — no second
+    API call needed.
 
     Usage:
         parser = ResumeParser()
         result = parser.parse(file_bytes=b"...", file_type="pdf")
+
+        # For images — pass OCR text from ValidationResult:
+        result = parser.parse_image(extracted_text="...", filename="scan.jpg")
     """
 
-    SUPPORTED_TYPES = {"pdf", "docx", "doc", "txt"}
+    SUPPORTED_TYPES       = {"pdf", "docx", "doc", "txt"}
+    SUPPORTED_IMAGE_TYPES = {"jpg", "jpeg", "png", "webp"}
 
     def parse(
         self,
@@ -373,6 +382,60 @@ class ResumeParser:
             result.error_message = str(e)
             result.parse_success = False
             logger.error(f"Resume parse failed for {filename}: {e}")
+
+        return result
+
+    def parse_image(
+        self,
+        extracted_text: str,
+        filename: str = "",
+    ) -> ResumeParseResult:
+        """
+        Build a ResumeParseResult from OCR text that was already extracted
+        by the DocumentValidator vision model.
+
+        WHY this exists separately from parse():
+          parse() handles binary file formats (PDF/DOCX) where we call
+          pymupdf or python-docx to extract text.
+          For images, the document_validator already called the Groq vision
+          API (OCR + classification in one shot).  We reuse that extracted
+          text here instead of making a second vision API call.
+
+        Result: image uploads produce exactly the same structured output
+        as PDF uploads — email, phone, GitHub, skills, etc. all extracted
+        from OCR text using the same regex field-extraction functions.
+        """
+        result = ResumeParseResult(file_type="image")
+
+        if not extracted_text or len(extracted_text.strip()) < 40:
+            result.error_message = "Insufficient text in image for field extraction"
+            return result
+
+        try:
+            cleaned = clean_text(extracted_text)
+            result.raw_text = cleaned
+            result.total_pages = 1
+
+            result.email         = extract_email(cleaned)
+            result.phone         = extract_phone(cleaned)
+            result.github_url    = extract_github_url(cleaned)
+            result.linkedin_url  = extract_linkedin_url(cleaned)
+            result.portfolio_url = extract_portfolio_url(cleaned)
+            result.skills        = extract_skills(cleaned)
+            result.education     = extract_education(cleaned)
+            result.full_name     = extract_name_from_top(cleaned)
+
+            result.parse_success = True
+
+            logger.info(
+                f"Image resume parsed | File: {filename} | "
+                f"Name: {result.full_name} | Skills: {len(result.skills)}"
+            )
+
+        except Exception as e:
+            result.error_message = str(e)
+            result.parse_success = False
+            logger.error(f"Image resume parse failed for {filename}: {e}")
 
         return result
 

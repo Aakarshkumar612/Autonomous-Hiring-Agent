@@ -25,6 +25,7 @@ Usage:
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
@@ -32,11 +33,20 @@ from typing import Optional
 from agents.detector import DetectionResult, DetectorAgent
 from agents.interviewer import InterviewerAgent
 from agents.orchestrator import OrchestratorDecision, OrchestratorAgent
+from connectors.supabase_mcp import supabase_store
 from memory.session_store import SessionStore
 from models.applicant import Applicant
 from models.interview import InterviewSession, SessionStatus
 from models.score import ApplicantScore
 from utils.logger import log_interview_event, logger
+
+# Maps orchestrator verdict strings to Supabase ApplicationStatus values.
+# Kept here so the mapping is explicit and easy to change in one place.
+_VERDICT_TO_STATUS = {
+    "accept": "accepted",
+    "reject": "rejected",
+    "hold":   "on_hold",
+}
 
 
 # ─────────────────────────────────────────────────────
@@ -371,6 +381,24 @@ class InterviewPipeline:
             session.final_verdict = decision.verdict
             self.session_store.update_session(session)
             self.session_store.end_session(session_id)
+
+            # Persist the final verdict to Supabase so it survives restarts.
+            # Uses asyncio.to_thread because supabase-py is a blocking client.
+            # A save failure is non-fatal — log it but still return the decision.
+            new_status = _VERDICT_TO_STATUS.get(decision.verdict, "on_hold")
+            try:
+                await asyncio.to_thread(
+                    supabase_store.update_applicant_status,
+                    applicant.id,
+                    new_status,
+                )
+                logger.info(
+                    f"INTERVIEW | [{session_id}] Supabase status updated → {new_status}"
+                )
+            except Exception as exc:
+                logger.error(
+                    f"INTERVIEW | [{session_id}] Supabase status update failed: {exc}"
+                )
 
             logger.info(
                 f"INTERVIEW | [{session_id}] Complete | "

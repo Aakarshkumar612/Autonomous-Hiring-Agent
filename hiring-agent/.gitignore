@@ -1,25 +1,70 @@
-# Environment variables
+# ════════════════════════════════════════════════════════════════
+#   HireIQ Backend (hiring-agent/) — .gitignore
+# ════════════════════════════════════════════════════════════════
+
+
+# ── SECRETS (NEVER COMMIT) ───────────────────────────────────────
 .env
 .env.local
 .env.production
+.env.staging
+.env.development
+.env.test
 .env.*
+!.env.example
 
-# Python
-__pycache__/
-*.py[oc]
-*.egg-info/
 
-# Build artifacts
-build/
-dist/
-wheels/
-
-# Virtual environments
-.venv/
-
-# Logs
+# ── LOGS (applicant PII: names, scores, interview transcripts) ───
 logs/
+*.log
+*.log.zip
+*.log.gz
 
-# OS
+
+# ── PYTHON ───────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.pyo
+*.pyd
+*.egg
+*.egg-info/
+dist/
+build/
+wheels/
+MANIFEST
+
+
+# ── VIRTUAL ENVIRONMENT ──────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+
+
+# ── TESTING ──────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+*.cover
+.mypy_cache/
+.ruff_cache/
+
+
+# ── DATABASES / VECTOR STORES ────────────────────────────────────
+*.db
+*.sqlite
+*.sqlite3
+chroma_data/
+faiss_index/
+
+
+# ── OS / EDITOR ──────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo

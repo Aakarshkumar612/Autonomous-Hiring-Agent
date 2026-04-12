@@ -26,9 +26,11 @@ import os
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from agents.researcher import ResearcherAgent
 from agents.scorer import ScorerAgent
 from connectors.csv_ingestor import IngestResult, csv_ingestor
-from memory.pageindex_store import PageIndexStore
+from connectors.supabase_mcp import supabase_store
+from memory.pageindex_store import PageIndexCapError, PageIndexStore
 from models.applicant import Applicant, ApplicationStatus
 from models.score import ApplicantScore, ScoringStatus
 from utils.logger import logger
@@ -124,8 +126,10 @@ class IngestPipeline:
         self,
         page_index: PageIndexStore | None = None,
         scorer: ScorerAgent | None = None,
+        researcher: ResearcherAgent | None = None,
     ) -> None:
-        self.scorer     = scorer or ScorerAgent()
+        self.scorer     = scorer     or ScorerAgent()
+        self.researcher = researcher or ResearcherAgent()
         self.page_index = page_index or PageIndexStore()
 
     # ─────────────────────────────────────────────────
@@ -177,43 +181,147 @@ class IngestPipeline:
         result: IngestPipelineResult,
     ) -> None:
         """
-        Score all applicants via ScorerAgent batch runs,
-        then index them in PageIndexStore.
+        Score all applicants via ScorerAgent batch runs, persist each to
+        Supabase, then index in PageIndexStore.
 
-        One failure per applicant never stops the batch.
+        Supabase saves run inside asyncio.to_thread (blocking client).
+        A save failure logs an error but never stops the pipeline —
+        the applicant is still indexed in PageIndexStore for the current run.
         DailyLimitExceededError propagates to the caller.
         """
         shortlist_t = _shortlist_threshold()
         reject_t    = _auto_reject_threshold()
 
-        # Run all batches
+        # ── Score all applicants ──────────────────────────────────────
         batch_results = await self.scorer.score_all(applicants)
 
-        # Flatten all scores from all batches
         all_scores: list[ApplicantScore] = []
         for batch in batch_results:
             all_scores.extend(batch.scores)
         result.scores = all_scores
 
-        # Build a lookup for quick access
         score_by_id = {s.applicant_id: s for s in all_scores}
+
+        # ── Per-applicant: persist + index ────────────────────────────
+        applicants_saved  = 0
+        applicants_failed = 0
+        scores_saved      = 0
+        scores_failed     = 0
 
         for applicant in applicants:
             score = score_by_id.get(applicant.id)
             if not score:
                 logger.warning(
-                    f"INGEST | No score returned for [{applicant.id}] — skipping index"
+                    f"INGEST | No score returned for [{applicant.id}] — skipping"
                 )
                 continue
 
-            # Bucket the score + update applicant status
+            # Bucket the score + update applicant.status in place
             self._bucket_score(score, result, shortlist_t, reject_t)
             self._update_applicant_status(applicant, score, shortlist_t, reject_t)
 
-            # Index in PageIndexStore
-            self.page_index.add_applicant(applicant, score=score)
+            # ── Save applicant (with final status) to Supabase ────────
+            try:
+                saved = await asyncio.to_thread(
+                    supabase_store.save_applicant, applicant
+                )
+                if saved:
+                    applicants_saved += 1
+                else:
+                    # supabase_store already logged the underlying error
+                    applicants_failed += 1
+            except Exception as exc:
+                applicants_failed += 1
+                logger.error(
+                    f"INGEST | Supabase save_applicant raised "
+                    f"for [{applicant.id}] {applicant.full_name}: {exc}"
+                )
 
+            # ── Save completed score to Supabase ──────────────────────
+            if score.status == ScoringStatus.COMPLETED:
+                try:
+                    saved = await asyncio.to_thread(
+                        supabase_store.save_score, score
+                    )
+                    if saved:
+                        scores_saved += 1
+                    else:
+                        scores_failed += 1
+                except Exception as exc:
+                    scores_failed += 1
+                    logger.error(
+                        f"INGEST | Supabase save_score raised "
+                        f"for [{applicant.id}] {applicant.full_name}: {exc}"
+                    )
+
+            # Index locally so this run's pipelines can use the data.
+            # PageIndexCapError means the store is full — log and stop indexing.
+            # Supabase persistence above already ran, so the applicant is not lost;
+            # it just won't be available for in-memory RAG this session.
+            try:
+                self.page_index.add_applicant(applicant, score=score)
+            except PageIndexCapError:
+                logger.warning(
+                    f"INGEST | PageIndex full — [{applicant.id}] {applicant.full_name} "
+                    f"persisted to Supabase but NOT indexed in-memory. "
+                    f"Raise MAX_APPLICANTS to resume in-memory RAG."
+                )
+                # Move remaining applicants to skipped so the result reflects reality.
+                remaining_idx = applicants.index(applicant)
+                for a in applicants[remaining_idx + 1:]:
+                    s = score_by_id.get(a.id)
+                    if s:
+                        result.skipped.append(s)
+                logger.error(
+                    f"INGEST | Stopped indexing at [{applicant.id}] — "
+                    f"PageIndex cap reached."
+                )
+                break
+
+        logger.info(
+            f"INGEST | Supabase persistence | "
+            f"Applicants — saved: {applicants_saved}, failed: {applicants_failed} | "
+            f"Scores — saved: {scores_saved}, failed: {scores_failed}"
+        )
         logger.info(f"INGEST | Scoring & indexing complete | {result.summary()}")
+
+        # ── Research pass — runs only on shortlisted applicants ───────
+        # We verify claimed skills and online presence via compound-beta's
+        # built-in web search. Research is optional: a failure on one applicant
+        # never aborts the pipeline. Skipped if GROQ_RESEARCHER is not set or
+        # if compound-beta quota is exhausted.
+        shortlisted_ids = {s.applicant_id for s in result.shortlisted}
+        shortlisted_applicants = [a for a in applicants if a.id in shortlisted_ids]
+
+        if shortlisted_applicants:
+            logger.info(
+                f"INGEST | Research pass starting | "
+                f"{len(shortlisted_applicants)} shortlisted applicants"
+            )
+            researched = 0
+            for applicant in shortlisted_applicants:
+                try:
+                    research = await self.researcher.research(applicant)
+                    if research.error:
+                        logger.warning(
+                            f"INGEST | Research failed for [{applicant.id}]: {research.error}"
+                        )
+                        continue
+                    # Append credibility red flags to the PageIndex profile's weaknesses.
+                    # This means the orchestrator will see them in the final decision.
+                    if research.verification.red_flags:
+                        profile = self.page_index.get_applicant(applicant.id)
+                        if profile:
+                            profile.weaknesses = (profile.weaknesses or []) + [
+                                f"[Research] {flag}"
+                                for flag in research.verification.red_flags
+                            ]
+                    researched += 1
+                except Exception as exc:
+                    logger.error(
+                        f"INGEST | Research exception for [{applicant.id}]: {exc}"
+                    )
+            logger.info(f"INGEST | Research pass complete | Researched: {researched}")
 
     # ─────────────────────────────────────────────────
     #  Public API

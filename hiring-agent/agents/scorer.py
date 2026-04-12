@@ -42,8 +42,10 @@ from utils.rate_limiter import (
     with_retry,
 )
 
-SCORER_MODEL = "llama-3.3-70b-versatile"
-BATCH_SIZE   = 50
+# Read model from env so it can be changed without touching source code.
+# Falls back to the proven default if GROQ_SCORER is not set.
+SCORER_MODEL = os.getenv("GROQ_SCORER", "llama-3.3-70b-versatile")
+BATCH_SIZE   = int(os.getenv("SCORING_BATCH_SIZE", "50"))
 
 
 class ScorerAgent:
@@ -72,8 +74,8 @@ class ScorerAgent:
                 {"role": "system", "content": SCORER_SYSTEM},
                 {"role": "user",   "content": prompt},
             ],
-            temperature=0.1,
-            max_tokens=1500,
+            temperature=0.0,   # deterministic — scores must be reproducible
+            max_tokens=800,    # JSON score object fits comfortably; 1500 was wasteful
             response_format={"type": "json_object"},
         )
         return response.choices[0].message.content
