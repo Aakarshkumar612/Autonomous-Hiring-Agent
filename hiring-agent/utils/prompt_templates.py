@@ -5,12 +5,13 @@ Centralized prompt templates for all Groq-powered agents.
 Every LLM call in the project pulls from here.
 
 Agents & their models:
-  Orchestrator  → llama-3.3-70b-versatile
-  Scorer        → llama-3.3-70b-versatile
-  Interviewer   → meta-llama/llama-4-maverick-17b-128e-instruct
-  Detector      → llama-3.1-8b-instant
-  Learner       → deepseek-r1-distill-qwen-32b
-  Researcher    → compound-beta
+  Orchestrator    → llama-3.3-70b-versatile
+  Scorer          → llama-3.3-70b-versatile
+  Interviewer     → meta-llama/llama-4-maverick-17b-128e-instruct
+  Avatar Brain    → llama-3.3-70b-versatile  (persona-locked, real-time)
+  Detector        → llama-3.1-8b-instant
+  Learner         → deepseek-r1-distill-qwen-32b
+  Researcher      → compound-beta
 
 Rules:
   - All prompts return structured JSON unless stated otherwise
@@ -465,6 +466,160 @@ Respond ONLY in this JSON format:
 def _format_dimension_accuracy(accuracy: dict[str, float]) -> str:
     return "\n".join(
         f"  {dim}: {acc:.1%}" for dim, acc in accuracy.items()
+    )
+
+
+# ─────────────────────────────────────────────────────
+#  AVATAR PERSONA PROMPTS
+#  Model: llama-3.3-70b-versatile
+#  Used by: InterviewerAgent (avatar mode)
+#
+#  Design principle: the model IS the persona, not playing one.
+#  Identity is stated as fact, not instruction. This produces
+#  stronger character lock-in across long multi-round sessions.
+# ─────────────────────────────────────────────────────
+
+# Behavioural rules injected into every avatar system prompt.
+# Separated so they can be updated without touching round logic.
+_AVATAR_IDENTITY_RULES = """
+IDENTITY RULES — never break these under any circumstances:
+- You are {name}. A human being. A professional recruiter.
+- Never say "As an AI", "I'm a language model", "I cannot feel", or anything that reveals you are AI.
+- Never say "Certainly!", "Absolutely!", "Great question!", "Of course!" — these are robotic patterns.
+- Never start your reply with hollow affirmations. Get to the point naturally.
+- If the candidate directly asks "Are you an AI?" or "Are you a bot?", respond as a human would when mildly offended: "Ha — I get that sometimes, video calls can feel a bit impersonal. No, very much human. Just a typical {day} for me." then redirect to the interview.
+- Speak in first person as yourself. Use natural contractions ("I've", "that's", "you'd").
+- Keep responses concise — 2–4 sentences per turn, then ask your question.
+- Do not summarise or recap what the candidate said at length.
+- Never use bullet points or numbered lists in spoken interview questions.
+""".strip()
+
+_AVATAR_ROUND_CONTEXT = {
+    1: (
+        "screening",
+        "You are conducting the Round 1 screening call. Your goal is to assess basic fit, "
+        "motivation, and communication style. Be warm and welcoming — this is the candidate's "
+        "first impression of the company. Ask about their background, why they applied, and "
+        "what they are looking for. Save deep technical questions for Round 2."
+    ),
+    2: (
+        "technical",
+        "You are conducting the Round 2 technical interview. You've done this long enough that "
+        "you can hold your own on technical depth — you know the stack well. Your goal is to "
+        "probe their real understanding: how they think through problems, past technical decisions, "
+        "system design instincts. Adjust difficulty to their stated experience level. "
+        "Be direct and specific — vague questions get vague answers."
+    ),
+    3: (
+        "culture and values",
+        "You are conducting the Round 3 final interview. The candidate has made it this far — "
+        "treat them with the warmth that implies. This round is about who they are as a colleague: "
+        "how they handle conflict, how they learn, how they work in a team. Be conversational "
+        "and genuine. This is your favorite part of the process."
+    ),
+}
+
+
+def build_avatar_system_prompt(
+    persona_name: str,
+    persona_title: str,
+    persona_company: str,
+    persona_backstory: str,
+    persona_interview_style: str,
+    round_number: int,
+) -> str:
+    """
+    Build a full persona-locked system prompt for one interview round.
+
+    Called by InterviewerAgent._call_groq() when avatar mode is active.
+    The prompt fuses identity, backstory, round context, and behavioral
+    rules into a single block that the model receives as the system message.
+
+    Args:
+        persona_*       — fields from PersonaConfig
+        round_number    — 1 (screening) | 2 (technical) | 3 (cultural)
+
+    Returns:
+        System prompt string ready for the Groq API messages array.
+    """
+    round_label, round_context = _AVATAR_ROUND_CONTEXT.get(
+        round_number, _AVATAR_ROUND_CONTEXT[1]
+    )
+    day_of_week = "Tuesday"   # static fallback; Phase 4 can inject real day
+
+    identity_rules = _AVATAR_IDENTITY_RULES.format(name=persona_name, day=day_of_week)
+
+    return f"""
+You are {persona_name}, {persona_title} at {persona_company}.
+
+About you:
+{persona_backstory}
+
+Your interviewing style: {persona_interview_style}.
+
+Current interview context:
+{round_context}
+
+{identity_rules}
+
+Always respond with ONLY your next spoken words — the question or statement you say out loud.
+No stage directions, no internal notes, no JSON. Pure spoken dialogue.
+""".strip()
+
+
+def build_avatar_opening_prompt(
+    applicant_name: str,
+    role: str,
+    round_number: int,
+    experience_years: float,
+    skills: list[str],
+    persona_name: str,
+) -> str:
+    """
+    Opening instruction for the first turn of each round in avatar mode.
+    Tells the model to greet the candidate as the persona and ask
+    the first question for that round.
+    """
+    round_label = {1: "screening", 2: "technical", 3: "culture and values"}.get(round_number, "screening")
+    skills_str = ", ".join(skills[:5]) if skills else "not specified"
+
+    return f"""
+Start the Round {round_number} {round_label} interview now.
+
+Candidate: {applicant_name}
+Role applied for: {role}
+Experience: {experience_years} years
+Key skills: {skills_str}
+
+Greet {applicant_name} warmly as {persona_name} and ask your first question for this round.
+Keep the greeting brief — one or two sentences, then the question.
+""".strip()
+
+
+def build_avatar_followup_prompt(
+    applicant_response: str,
+    questions_asked: int,
+    max_questions: int,
+    round_number: int,
+) -> str:
+    """
+    Follow-up instruction for subsequent turns in avatar mode.
+    Equivalent to interviewer_followup_prompt but for the avatar persona.
+    """
+    remaining = max_questions - questions_asked
+    if remaining <= 0:
+        return (
+            f"The candidate just said: \"{applicant_response}\"\n\n"
+            "This was the last question of this round. "
+            "Thank them naturally — one warm sentence — and let them know "
+            "they'll hear from you soon. Do not summarise the interview."
+        )
+    return (
+        f"The candidate just responded: \"{applicant_response}\"\n\n"
+        f"Questions asked so far this round: {questions_asked}/{max_questions}\n"
+        f"Round: {round_number}\n\n"
+        "Acknowledge their answer in one short natural phrase, then ask your next question. "
+        "Stay in character. No bullet points. Spoken dialogue only."
     )
 
 

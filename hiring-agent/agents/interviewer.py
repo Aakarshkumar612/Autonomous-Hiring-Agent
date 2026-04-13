@@ -44,8 +44,12 @@ from models.interview import (
     SessionStatus,
 )
 from utils.logger import log_interview_event, logger
+from agents.avatar_persona import HumanResponseShaper, PersonaConfig
 from utils.prompt_templates import (
     INTERVIEWER_SYSTEMS,
+    build_avatar_followup_prompt,
+    build_avatar_opening_prompt,
+    build_avatar_system_prompt,
     interviewer_followup_prompt,
     interviewer_opening_prompt,
     interviewer_round_summary_prompt,
@@ -53,6 +57,8 @@ from utils.prompt_templates import (
 from utils.rate_limiter import DailyLimitExceededError, rate_limiter, with_retry
 
 INTERVIEWER_MODEL   = os.getenv("GROQ_INTERVIEWER", "meta-llama/llama-4-maverick-17b-128e-instruct")
+# Avatar mode uses a larger model — better persona adherence over long sessions.
+AVATAR_BRAIN_MODEL  = os.getenv("GROQ_AVATAR_BRAIN", "llama-3.3-70b-versatile")
 QUESTIONS_PER_ROUND = int(os.getenv("INTERVIEW_QUESTIONS_PER_ROUND", "5"))
 MIN_RESPONSE_WORDS  = 20
 
@@ -78,9 +84,30 @@ class InterviewerAgent:
     the persisted model.
     """
 
-    def __init__(self, api_key: str | None = None) -> None:
-        self.client = AsyncGroq(api_key=api_key or os.environ["GROQ_API_KEY"])
-        self.model  = INTERVIEWER_MODEL
+    def __init__(
+        self,
+        api_key: str | None = None,
+        persona_config: PersonaConfig | None = None,
+    ) -> None:
+        """
+        Args:
+            api_key:        Groq API key. Defaults to GROQ_API_KEY env var.
+            persona_config: When set, activates avatar mode:
+                            - Switches to AVATAR_BRAIN_MODEL (llama-3.3-70b-versatile)
+                            - Uses persona-locked system prompts
+                            - Shapes every response through HumanResponseShaper
+                            Pass None (default) for standard text-only interview mode.
+        """
+        self.client  = AsyncGroq(api_key=api_key or os.environ["GROQ_API_KEY"])
+        self.persona = persona_config
+
+        # Avatar mode → stronger model + persona prompts + response shaping
+        if persona_config is not None:
+            self.model  = AVATAR_BRAIN_MODEL
+            self._shaper = HumanResponseShaper()
+        else:
+            self.model   = INTERVIEWER_MODEL
+            self._shaper = None
 
         # session_id → True when awaiting a follow-up response
         self._followup_pending: dict[str, bool] = {}
@@ -138,24 +165,60 @@ class InterviewerAgent:
     #  Groq API calls
     # ─────────────────────────────────────────────────
 
+    def _build_system_prompt(self, round_number: int) -> str:
+        """
+        Return the correct system prompt for the current round.
+        Avatar mode → persona-locked prompt.
+        Standard mode → generic recruiter prompt.
+        """
+        if self.persona is not None:
+            return build_avatar_system_prompt(
+                persona_name=self.persona.name,
+                persona_title=self.persona.title,
+                persona_company=self.persona.company,
+                persona_backstory=self.persona.backstory,
+                persona_interview_style=self.persona.interview_style,
+                round_number=round_number,
+            )
+        return INTERVIEWER_SYSTEMS[round_number]
+
+    def _shape(self, text: str, inject_acknowledgement: bool = False) -> str:
+        """
+        Run response through HumanResponseShaper in avatar mode.
+        No-op in standard mode. Returns only the shaped text
+        (emotion state is used in Phase 3 — ignored for now).
+        """
+        if self._shaper is None:
+            return text
+        shaped, _emotion = self._shaper.shape(
+            text,
+            is_question=True,
+            inject_acknowledgement=inject_acknowledgement,
+        )
+        return shaped
+
     async def _call_groq(self, session: InterviewSession, user_prompt: str) -> str:
         """
         Interview call — includes conversation history so the model
         has full context of the exchange so far.
         The user_prompt is a meta-instruction (not the applicant's words).
+
+        In avatar mode, the system prompt is persona-locked and the
+        raw response is shaped through HumanResponseShaper before return.
         """
         await rate_limiter.acquire(self.model)
         response = await self.client.chat.completions.create(
             model=self.model,
             messages=[
-                {"role": "system", "content": INTERVIEWER_SYSTEMS[session.current_round]},
+                {"role": "system", "content": self._build_system_prompt(session.current_round)},
                 *session.get_conversation_history(),
                 {"role": "user", "content": user_prompt},
             ],
             temperature=0.7,
             max_tokens=500,
         )
-        return response.choices[0].message.content.strip()
+        raw = response.choices[0].message.content.strip()
+        return self._shape(raw)
 
     async def _call_groq_summary(self, prompt: str) -> str:
         """
@@ -233,15 +296,28 @@ class InterviewerAgent:
         Generate and record the opening question for the current round.
         Adds the question to session.questions and session.messages.
         Returns the question text.
+
+        In avatar mode, uses build_avatar_opening_prompt so the persona's
+        name and greeting style are consistent with the system prompt.
         """
-        meta   = self._session_meta.get(session.session_id, {})
-        prompt = interviewer_opening_prompt(
-            applicant_name=session.applicant_name,
-            role=session.role_applied,
-            round_number=session.current_round,
-            experience_years=meta.get("experience_years", 0.0),
-            skills=meta.get("skills", []),
-        )
+        meta = self._session_meta.get(session.session_id, {})
+        if self.persona is not None:
+            prompt = build_avatar_opening_prompt(
+                applicant_name=session.applicant_name,
+                role=session.role_applied,
+                round_number=session.current_round,
+                experience_years=meta.get("experience_years", 0.0),
+                skills=meta.get("skills", []),
+                persona_name=self.persona.name,
+            )
+        else:
+            prompt = interviewer_opening_prompt(
+                applicant_name=session.applicant_name,
+                role=session.role_applied,
+                round_number=session.current_round,
+                experience_years=meta.get("experience_years", 0.0),
+                skills=meta.get("skills", []),
+            )
         question_text = await with_retry(
             self._call_groq,
             session,
@@ -286,15 +362,24 @@ class InterviewerAgent:
         last_response: str,
     ) -> str:
         """
-        Ask the next main question using interviewer_followup_prompt.
-        Adds the new InterviewQuestion and AGENT message to the session.
+        Ask the next main question.
+        Avatar mode → build_avatar_followup_prompt (persona-aware).
+        Standard mode → interviewer_followup_prompt.
         """
-        prompt = interviewer_followup_prompt(
-            applicant_response=last_response,
-            questions_asked=self._questions_this_round(session),
-            max_questions=QUESTIONS_PER_ROUND,
-            round_number=session.current_round,
-        )
+        if self.persona is not None:
+            prompt = build_avatar_followup_prompt(
+                applicant_response=last_response,
+                questions_asked=self._questions_this_round(session),
+                max_questions=QUESTIONS_PER_ROUND,
+                round_number=session.current_round,
+            )
+        else:
+            prompt = interviewer_followup_prompt(
+                applicant_response=last_response,
+                questions_asked=self._questions_this_round(session),
+                max_questions=QUESTIONS_PER_ROUND,
+                round_number=session.current_round,
+            )
         question_text = await with_retry(
             self._call_groq,
             session,

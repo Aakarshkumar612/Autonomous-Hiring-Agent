@@ -1,28 +1,18 @@
 # ════════════════════════════════════════════════════════════════
-#   HireIQ Monorepo — Root .gitignore
-#   Covers: Python backend, Next.js frontend, monorepo tooling
+#   HireIQ — Root .gitignore (Python/FastAPI backend only)
 # ════════════════════════════════════════════════════════════════
 
 
-# ── SECRETS & ENV FILES (NEVER COMMIT) ──────────────────────────
+# ── SECRETS & ENV (NEVER COMMIT) ────────────────────────────────
 .env
-.env.local
-.env.production
-.env.staging
-.env.development
-.env.test
 .env.*
 !.env.example
-!.env.local.example
 hiring-agent/.env
 hiring-agent/.env.*
 !hiring-agent/.env.example
-frontend/.env.local
-frontend/.env.*
-!frontend/.env.local.example
 
 
-# ── LOGS (contain applicant PII — names, scores, transcripts) ───
+# ── LOGS (contain applicant PII) ────────────────────────────────
 logs/
 *.log
 *.log.zip
@@ -41,21 +31,19 @@ __pycache__/
 *.egg-info/
 dist/
 build/
-.eggs/
 wheels/
 MANIFEST
 
 
-# ── PYTHON VIRTUAL ENVIRONMENTS ─────────────────────────────────
+# ── VIRTUAL ENVIRONMENTS ─────────────────────────────────────────
 .venv/
 venv/
 env/
 ENV/
-.env/
 hiring-agent/.venv/
 
 
-# ── PYTHON TOOLING ──────────────────────────────────────────────
+# ── PYTHON TOOLING ───────────────────────────────────────────────
 .pytest_cache/
 .coverage
 .coverage.*
@@ -68,48 +56,15 @@ htmlcov/
 dmypy.json
 
 
-# ── NODE / NEXT.JS ──────────────────────────────────────────────
-node_modules/
-frontend/node_modules/
-.next/
-frontend/.next/
-out/
-frontend/out/
-.npm
-.yarn/
-.pnp
-.pnp.js
-
-
-# ── BUILD ARTIFACTS ─────────────────────────────────────────────
-dist/
-build/
-*.tsbuildinfo
-frontend/next-env.d.ts
-
-
-# ── INTERNAL / DESIGN EXPORTS ───────────────────────────────────
-# These are internal working files, not meant for the public repo
-stitch-exports/
-system-design.html
-project_handoff_context.md
-PROJECT_CONTEXT.md
-
-
-# ── AI TOOLING ──────────────────────────────────────────────────
-.claude/
-
-
-# ── DATABASES / VECTOR STORES ───────────────────────────────────
+# ── DATABASES / VECTOR STORES ────────────────────────────────────
 *.db
 *.sqlite
 *.sqlite3
 chroma_data/
-hiring-agent/chroma_data/
 faiss_index/
 
 
-# ── CERTIFICATES & KEYS ─────────────────────────────────────────
+# ── CERTIFICATES & KEYS ──────────────────────────────────────────
 *.pem
 *.key
 *.p12
@@ -119,13 +74,19 @@ faiss_index/
 *.der
 
 
-# ── OS ──────────────────────────────────────────────────────────
+# ── AI TOOLING ───────────────────────────────────────────────────
+.claude/
+
+
+# ── INTERNAL DOCS (not for public repo) ──────────────────────────
+system-design.html
+project_handoff_context.md
+PROJECT_CONTEXT.md
+
+
+# ── OS ───────────────────────────────────────────────────────────
 .DS_Store
-.DS_Store?
 ._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
 Thumbs.db
 Desktop.ini
 
@@ -135,19 +96,13 @@ Desktop.ini
 .idea/
 *.swp
 *.swo
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
 .history/
 
 
-# ── TEMP / MISC ──────────────────────────────────────────────────
+# ── TEMP ─────────────────────────────────────────────────────────
 *.tmp
 *.bak
 *.orig
 *.rej
-*.patch
 tmp/
 temp/

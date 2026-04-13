@@ -25,6 +25,15 @@ dependencies = [
     "supabase>=2.4.0",
     # ── PageIndex (vectorless reasoning-based RAG) ─
     "pageindex>=0.2.6",
+    # ── Avatar TTS (Microsoft Edge Neural TTS) ───────
+    # Free, cloud-based, no model download, no GPU needed.
+    # Provides word-boundary timing events for lip sync.
+    "edge-tts>=6.1.9",         # Microsoft Edge Neural TTS (async, streaming)
+    "pydub>=0.25.1",           # MP3 → WAV conversion (requires system FFmpeg)
+    # ── Jitsi Meet Bot (Phase 4) ─────────────────────
+    # Browser automation for bot participant + candidate audio capture.
+    # After install: uv run playwright install chromium
+    "playwright>=1.44.0",      # Headless Chromium for Jitsi bot participant
     # ── AI & Plagiarism Detection ─────────────────
     # Handled by Groq (llama-3.1-8b-instant) — local torch/transformers
     # removed (~500 MB saved, no active usage in codebase).
