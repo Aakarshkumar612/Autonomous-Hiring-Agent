@@ -30,7 +30,8 @@ from typing import Optional
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, HTTPException, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 # Load .env before anything else so all agents see the env vars
 load_dotenv()
@@ -144,10 +145,32 @@ app.add_middleware(
 # Mount the portal sub-application
 app.mount("/portal", portal_app)
 
+# Serve static assets (DSA platform HTML, CSS, JS)
+_static_dir = os.path.join(os.path.dirname(__file__), "static")
+if os.path.isdir(_static_dir):
+    app.mount("/static", StaticFiles(directory=_static_dir), name="static")
+
 
 # ─────────────────────────────────────────────────────
 #  Health Check
 # ─────────────────────────────────────────────────────
+
+@app.get(
+    "/dsa/platform",
+    tags=["DSA Platform"],
+    summary="Serve the DSA interview platform HTML",
+    response_class=FileResponse,
+)
+async def dsa_platform():
+    """
+    Returns the self-hosted LeetCode-style DSA interview platform.
+    Open with ?session=xxx&applicant=yyy&recruiter=zzz&problem=ppp query params.
+    """
+    html_path = os.path.join(_static_dir, "dsa_platform.html")
+    if not os.path.exists(html_path):
+        raise HTTPException(status_code=404, detail="DSA platform HTML not found")
+    return FileResponse(html_path, media_type="text/html")
+
 
 @app.get(
     "/health",

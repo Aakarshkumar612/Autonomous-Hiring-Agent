@@ -1,0 +1,1146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HireIQ — DSA Interview</title>
+
+  <!-- Monaco Editor (VS Code's editor engine) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs/loader.min.js"></script>
+  <!-- Split.js for resizable panels -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/split.js/1.6.5/split.min.js"></script>
+  <!-- Marked.js for Markdown rendering -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
+
+  <style>
+    :root {
+      --bg:        #0d1117;
+      --bg2:       #161b22;
+      --bg3:       #21262d;
+      --border:    #30363d;
+      --text:      #e6edf3;
+      --muted:     #8b949e;
+      --accent:    #58a6ff;
+      --green:     #3fb950;
+      --yellow:    #d29922;
+      --red:       #f85149;
+      --orange:    #e3b341;
+      --radius:    6px;
+      --font-mono: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+      --pip-w:     320px;
+      --pip-h:     220px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      font-size: 14px;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* ── Top navbar ── */
+    #navbar {
+      background: var(--bg2);
+      border-bottom: 1px solid var(--border);
+      padding: 0 16px;
+      height: 48px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      flex-shrink: 0;
+      z-index: 100;
+    }
+    #navbar .logo {
+      font-weight: 700;
+      font-size: 16px;
+      color: var(--accent);
+      letter-spacing: -0.5px;
+    }
+    #navbar .sep { flex: 1; }
+    #navbar .pill {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 4px 12px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    #navbar .pill span { color: var(--text); font-weight: 600; }
+    #timer {
+      font-family: var(--font-mono);
+      font-size: 14px;
+      color: var(--yellow);
+      min-width: 60px;
+      text-align: right;
+    }
+    #timer.urgent { color: var(--red); animation: blink 1s step-end infinite; }
+    @keyframes blink { 50% { opacity: 0; } }
+
+    /* ── Main workspace ── */
+    #workspace {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    .split { display: flex; flex: 1; overflow: hidden; }
+    .split > * { overflow: hidden; }
+
+    .gutter {
+      background: var(--bg2);
+      border-left: 1px solid var(--border);
+      border-right: 1px solid var(--border);
+      cursor: col-resize;
+      width: 6px;
+      flex-shrink: 0;
+      transition: background 0.15s;
+    }
+    .gutter:hover, .gutter.gutter-horizontal { background: var(--accent); }
+
+    /* ── Left panel — problem ── */
+    #problem-panel {
+      background: var(--bg2);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      min-width: 280px;
+    }
+    #problem-tabs {
+      display: flex;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .tab-btn {
+      padding: 10px 16px;
+      font-size: 13px;
+      color: var(--muted);
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      background: none;
+      border-top: none;
+      border-left: none;
+      border-right: none;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .tab-btn.active {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+    }
+    .tab-btn:hover { color: var(--text); }
+
+    #problem-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+    }
+    #problem-content::-webkit-scrollbar { width: 6px; }
+    #problem-content::-webkit-scrollbar-track { background: transparent; }
+    #problem-content::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    .problem-title {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+    .difficulty-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 12px;
+      font-weight: 600;
+      margin-bottom: 16px;
+    }
+    .diff-easy   { background: rgba(63,185,80,.15); color: var(--green); }
+    .diff-medium { background: rgba(210,153,34,.15); color: var(--yellow); }
+    .diff-hard   { background: rgba(248,81,73,.15);  color: var(--red); }
+
+    .problem-body { line-height: 1.7; color: var(--text); }
+    .problem-body h3 { margin: 16px 0 8px; font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+    .problem-body pre {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 12px;
+      font-family: var(--font-mono);
+      font-size: 13px;
+      overflow-x: auto;
+      margin: 8px 0;
+    }
+    .problem-body code {
+      font-family: var(--font-mono);
+      font-size: 13px;
+      background: var(--bg3);
+      padding: 1px 5px;
+      border-radius: 3px;
+    }
+    .tag {
+      display: inline-block;
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 2px 8px;
+      font-size: 11px;
+      color: var(--muted);
+      margin: 2px;
+    }
+
+    /* ── Right panel — editor ── */
+    #editor-panel {
+      display: flex;
+      flex-direction: column;
+      min-width: 300px;
+      background: var(--bg);
+    }
+
+    /* Editor toolbar */
+    #editor-toolbar {
+      background: var(--bg2);
+      border-bottom: 1px solid var(--border);
+      padding: 8px 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+
+    #lang-select {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-size: 13px;
+      padding: 5px 10px;
+      cursor: pointer;
+      outline: none;
+    }
+    #lang-select:focus { border-color: var(--accent); }
+
+    .toolbar-sep { flex: 1; }
+
+    .btn {
+      padding: 6px 14px;
+      border-radius: var(--radius);
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      transition: opacity 0.15s, transform 0.1s;
+    }
+    .btn:hover { opacity: 0.85; }
+    .btn:active { transform: scale(0.97); }
+    .btn-run    { background: var(--bg3); border: 1px solid var(--border); color: var(--text); }
+    .btn-submit { background: var(--green); color: #000; }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* Monaco editor container */
+    #monaco-container {
+      flex: 1;
+      overflow: hidden;
+    }
+
+    /* Test results / console output */
+    #output-panel {
+      background: var(--bg2);
+      border-top: 1px solid var(--border);
+      height: 220px;
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    #output-tabs {
+      display: flex;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    #output-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px 16px;
+      font-family: var(--font-mono);
+      font-size: 13px;
+    }
+    #output-body::-webkit-scrollbar { width: 6px; }
+    #output-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    .result-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 6px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .result-row:last-child { border-bottom: none; }
+    .result-icon { font-size: 16px; }
+    .result-label { color: var(--muted); font-size: 12px; }
+    .result-pass { color: var(--green); }
+    .result-fail { color: var(--red); }
+    .result-detail { font-size: 12px; color: var(--muted); margin-top: 2px; }
+    .result-detail span { color: var(--text); }
+
+    .score-banner {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 0;
+      margin-bottom: 8px;
+    }
+    .score-num { font-size: 22px; font-weight: 700; }
+    .score-accepted { color: var(--green); }
+    .score-partial  { color: var(--yellow); }
+    .score-fail     { color: var(--red); }
+
+    .loader {
+      display: inline-block;
+      width: 16px; height: 16px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      vertical-align: middle;
+      margin-right: 6px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Avatar proctor PiP ── */
+    #proctor-pip {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      width: var(--pip-w);
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      box-shadow: 0 8px 32px rgba(0,0,0,.6);
+      z-index: 1000;
+      overflow: hidden;
+      user-select: none;
+    }
+    #pip-header {
+      background: var(--bg3);
+      border-bottom: 1px solid var(--border);
+      padding: 8px 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: move;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--muted);
+    }
+    .pip-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--green);
+      animation: pulse-dot 2s ease-in-out infinite;
+    }
+    @keyframes pulse-dot {
+      0%,100% { opacity: 1; }
+      50%      { opacity: 0.4; }
+    }
+    .pip-dot.alert { background: var(--red); animation: none; }
+
+    #pip-video {
+      width: 100%;
+      height: var(--pip-h);
+      background: #000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+    }
+    #pip-video video, #pip-video iframe {
+      width: 100%; height: 100%;
+      object-fit: cover;
+    }
+    #pip-placeholder {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    #pip-placeholder .avatar-icon {
+      font-size: 48px;
+    }
+    #pip-footer {
+      padding: 10px 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    #proctor-status {
+      flex: 1;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .strike-badge {
+      display: flex;
+      gap: 4px;
+    }
+    .strike-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--border);
+      transition: background 0.3s;
+    }
+    .strike-dot.active { background: var(--red); }
+
+    /* ── Warning overlay ── */
+    #warning-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(248,81,73,.08);
+      border: 2px solid var(--red);
+      z-index: 2000;
+      pointer-events: none;
+      animation: flash-border 0.5s ease-in-out 3;
+    }
+    @keyframes flash-border {
+      0%,100% { border-color: var(--red); }
+      50%      { border-color: transparent; }
+    }
+
+    /* ── Kicked modal ── */
+    #kicked-modal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.85);
+      z-index: 3000;
+      align-items: center;
+      justify-content: center;
+    }
+    #kicked-modal.show { display: flex; }
+    .kicked-card {
+      background: var(--bg2);
+      border: 1px solid var(--red);
+      border-radius: 12px;
+      padding: 32px;
+      max-width: 460px;
+      text-align: center;
+    }
+    .kicked-card .icon { font-size: 48px; margin-bottom: 16px; }
+    .kicked-card h2 { color: var(--red); margin-bottom: 8px; }
+    .kicked-card p  { color: var(--muted); line-height: 1.6; }
+
+    /* ── Toast notifications ── */
+    #toast-container {
+      position: fixed;
+      top: 60px;
+      right: 16px;
+      z-index: 5000;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .toast {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 10px 14px;
+      font-size: 13px;
+      min-width: 240px;
+      animation: slide-in 0.2s ease;
+      box-shadow: 0 4px 12px rgba(0,0,0,.4);
+    }
+    .toast.warn  { border-color: var(--yellow); color: var(--yellow); }
+    .toast.error { border-color: var(--red);    color: var(--red); }
+    .toast.ok    { border-color: var(--green);  color: var(--green); }
+    @keyframes slide-in { from { transform: translateX(30px); opacity: 0; } }
+
+    /* scrollbar global */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  </style>
+</head>
+<body>
+
+<!-- ── Navbar ── -->
+<nav id="navbar">
+  <div class="logo">⚡ HireIQ</div>
+  <div class="pill" id="session-pill">Session: <span id="session-id-display">loading…</span></div>
+  <div class="pill" id="tier-pill">Plan: <span id="tier-display">—</span></div>
+  <div class="sep"></div>
+  <div id="timer">90:00</div>
+</nav>
+
+<!-- ── Workspace ── -->
+<div id="workspace">
+  <div class="split" id="main-split">
+
+    <!-- Left: Problem panel -->
+    <div id="problem-panel">
+      <div id="problem-tabs">
+        <button class="tab-btn active" onclick="switchTab('description')">Description</button>
+        <button class="tab-btn" onclick="switchTab('examples')">Examples</button>
+        <button class="tab-btn" onclick="switchTab('submissions')">Submissions</button>
+      </div>
+      <div id="problem-content">
+        <div id="tab-description">
+          <div class="problem-title" id="problem-title">Loading problem…</div>
+          <div id="difficulty-badge" class="difficulty-badge diff-medium">Medium</div>
+          <div class="problem-body" id="problem-body"></div>
+          <div style="margin-top:16px;" id="tags-container"></div>
+        </div>
+        <div id="tab-examples" style="display:none">
+          <div id="examples-body"></div>
+        </div>
+        <div id="tab-submissions" style="display:none">
+          <div id="submissions-body" style="color:var(--muted);font-size:13px;">
+            No submissions yet. Run your code first.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right: Editor panel -->
+    <div id="editor-panel">
+      <!-- Toolbar -->
+      <div id="editor-toolbar">
+        <select id="lang-select" onchange="onLangChange()">
+          <option value="python3">Python 3</option>
+          <option value="java">Java</option>
+          <option value="cpp17">C++ 17</option>
+          <option value="javascript">JavaScript (Node)</option>
+          <option value="typescript">TypeScript</option>
+          <option value="go">Go</option>
+          <option value="rust">Rust</option>
+          <option value="csharp">C#</option>
+          <option value="kotlin">Kotlin</option>
+          <option value="swift">Swift</option>
+          <option value="ruby">Ruby</option>
+          <option value="scala">Scala</option>
+          <option value="php">PHP</option>
+          <option value="c">C</option>
+          <option value="bash">Bash</option>
+          <option value="sql">SQL</option>
+        </select>
+        <div class="toolbar-sep"></div>
+        <button class="btn btn-run"    id="btn-run"    onclick="runCode()">▶ Run</button>
+        <button class="btn btn-submit" id="btn-submit" onclick="submitCode()">Submit</button>
+      </div>
+
+      <!-- Monaco editor -->
+      <div id="monaco-container"></div>
+
+      <!-- Output panel -->
+      <div id="output-panel">
+        <div id="output-tabs">
+          <button class="tab-btn active" onclick="switchOutputTab('testcase')">Test Cases</button>
+          <button class="tab-btn" onclick="switchOutputTab('console')">Console</button>
+        </div>
+        <div id="output-body">
+          <div style="color:var(--muted);font-size:13px;">
+            Click <strong style="color:var(--text)">▶ Run</strong> to test against sample cases,
+            or <strong style="color:var(--green)">Submit</strong> to run all hidden tests.
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /main-split -->
+</div><!-- /workspace -->
+
+<!-- ── Avatar Proctor PiP ── -->
+<div id="proctor-pip">
+  <div id="pip-header">
+    <div class="pip-dot" id="pip-dot"></div>
+    AI Proctor — HireIQ
+  </div>
+  <div id="pip-video">
+    <div id="pip-placeholder">
+      <div class="avatar-icon">🤖</div>
+      <div>Avatar connecting…</div>
+    </div>
+  </div>
+  <div id="pip-footer">
+    <div id="proctor-status">Monitoring session</div>
+    <div class="strike-badge">
+      <div class="strike-dot" id="s1"></div>
+      <div class="strike-dot" id="s2"></div>
+      <div class="strike-dot" id="s3"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Warning overlay (flashes on cheat detection) ── -->
+<div id="warning-overlay"></div>
+
+<!-- ── Kicked modal ── -->
+<div id="kicked-modal">
+  <div class="kicked-card">
+    <div class="icon">🚫</div>
+    <h2>Session Terminated</h2>
+    <p id="kicked-message">
+      Your session has been terminated due to repeated integrity violations.
+      Your recruiter has been notified.
+    </p>
+  </div>
+</div>
+
+<!-- ── Toast container ── -->
+<div id="toast-container"></div>
+
+
+<script>
+// ═══════════════════════════════════════════════════════
+//  HireIQ DSA Platform — Main Controller
+// ═══════════════════════════════════════════════════════
+
+const STATE = {
+  sessionId:    null,
+  recruiterId:  null,
+  applicantId:  null,
+  problemId:    null,
+  problemType:  'dsa',   // 'dsa' | 'sql'
+  language:     'python3',
+  strikeCount:  0,
+  kicked:       false,
+  timerSec:     90 * 60,
+  timerInterval: null,
+  submissions:  [],
+  wsProctor:    null,
+};
+
+// ── Starter code templates ─────────────────────────────
+const STARTERS = {
+  python3:    '# Write your solution here\n\ndef solution():\n    pass\n',
+  java:       'import java.util.*;\n\npublic class Solution {\n    public static void main(String[] args) {\n        // your code here\n    }\n}\n',
+  cpp17:      '#include <bits/stdc++.h>\nusing namespace std;\n\nint main() {\n    // your code here\n    return 0;\n}\n',
+  javascript: '// Write your solution here\nconst readline = require("readline");\n\nconst rl = readline.createInterface({ input: process.stdin });\nrl.on("line", line => {\n    // process input\n});\n',
+  typescript: '// Write your solution here\nprocess.stdin.resume();\nprocess.stdin.setEncoding("utf8");\nlet input = "";\nprocess.stdin.on("data", d => input += d);\nprocess.stdin.on("end", () => {\n    // process input\n});\n',
+  go:         'package main\n\nimport "fmt"\n\nfunc main() {\n    // your code here\n    fmt.Println("hello")\n}\n',
+  rust:       'use std::io::{self, BufRead};\n\nfn main() {\n    let stdin = io::stdin();\n    for line in stdin.lock().lines() {\n        let line = line.unwrap();\n        // process line\n    }\n}\n',
+  csharp:     'using System;\n\nclass Solution {\n    static void Main() {\n        // your code here\n    }\n}\n',
+  kotlin:     'fun main() {\n    // your code here\n    println("hello")\n}\n',
+  swift:      'import Foundation\n\n// your code here\n',
+  ruby:       '# your code here\n',
+  scala:      'object Solution extends App {\n  // your code here\n}\n',
+  php:        '<?php\n// your code here\n?>',
+  c:          '#include <stdio.h>\n\nint main() {\n    // your code here\n    return 0;\n}\n',
+  bash:       '#!/bin/bash\n# your code here\nwhile IFS= read -r line; do\n  echo "$line"\ndone\n',
+  sql:        '-- Write your SQL query here\nSELECT *\nFROM table_name\nWHERE condition;\n',
+};
+
+const MONACO_LANG_MAP = {
+  python3: 'python', java: 'java', cpp17: 'cpp', javascript: 'javascript',
+  typescript: 'typescript', go: 'go', rust: 'rust', csharp: 'csharp',
+  kotlin: 'kotlin', swift: 'swift', ruby: 'ruby', scala: 'scala',
+  php: 'php', c: 'c', bash: 'shell', sql: 'sql',
+};
+
+// ── Monaco init ────────────────────────────────────────
+let editor = null;
+
+require.config({ paths: { vs: 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs' } });
+require(['vs/editor/editor.main'], function () {
+  editor = monaco.editor.create(document.getElementById('monaco-container'), {
+    value: STARTERS['python3'],
+    language: 'python',
+    theme: 'vs-dark',
+    fontSize: 14,
+    fontFamily: "'SF Mono', 'Fira Code', 'Cascadia Code', monospace",
+    lineNumbers: 'on',
+    minimap: { enabled: false },
+    scrollBeyondLastLine: false,
+    wordWrap: 'off',
+    automaticLayout: true,
+    tabSize: 4,
+    padding: { top: 10 },
+  });
+
+  // Detect copy-paste (proctor hook)
+  editor.onDidPaste((e) => {
+    const pasted = editor.getModel().getValueInRange(e.range);
+    if (pasted.trim().split('\n').length > 5) {
+      reportCheatEvent('rapid_paste', `Pasted ${pasted.trim().split('\n').length} lines`);
+    } else {
+      reportCheatEvent('copy_paste', 'Code pasted in editor');
+    }
+  });
+
+  // Auto-resize monaco when window changes
+  window.addEventListener('resize', () => editor.layout());
+
+  // Init session after editor is ready
+  initSession();
+});
+
+// ── Split panels ───────────────────────────────────────
+Split(['#problem-panel', '#editor-panel'], {
+  sizes: [40, 60],
+  minSize: [280, 340],
+  gutterSize: 6,
+  cursor: 'col-resize',
+});
+
+// ── Tab switching ──────────────────────────────────────
+function switchTab(tab) {
+  ['description','examples','submissions'].forEach(t => {
+    document.getElementById('tab-' + t).style.display = t === tab ? '' : 'none';
+  });
+  document.querySelectorAll('#problem-tabs .tab-btn').forEach((btn, i) => {
+    btn.classList.toggle('active', ['description','examples','submissions'][i] === tab);
+  });
+}
+
+function switchOutputTab(tab) {
+  document.querySelectorAll('#output-tabs .tab-btn').forEach((btn, i) => {
+    btn.classList.toggle('active', ['testcase','console'][i] === tab);
+  });
+}
+
+// ── Language change ────────────────────────────────────
+function onLangChange() {
+  const lang = document.getElementById('lang-select').value;
+  STATE.language = lang;
+  const monacoLang = MONACO_LANG_MAP[lang] || 'plaintext';
+  monaco.editor.setModelLanguage(editor.getModel(), monacoLang);
+
+  // Only set starter if editor is mostly empty
+  const current = editor.getValue().trim();
+  const isDefault = Object.values(STARTERS).some(s => s.trim() === current);
+  if (current === '' || isDefault) {
+    editor.setValue(STARTERS[lang] || '');
+  }
+
+  // Toggle SQL-specific UI
+  const isSql = lang === 'sql';
+  document.getElementById('btn-run').textContent = isSql ? '▶ Run Query' : '▶ Run';
+}
+
+// ── Session init ───────────────────────────────────────
+async function initSession() {
+  // Parse URL params: ?session=xxx&applicant=yyy&recruiter=zzz&problem=ppp
+  const params = new URLSearchParams(window.location.search);
+  STATE.sessionId   = params.get('session')   || 'dev_session';
+  STATE.applicantId = params.get('applicant') || 'dev_applicant';
+  STATE.recruiterId = params.get('recruiter') || 'dev_recruiter';
+  STATE.problemId   = params.get('problem')   || null;
+
+  document.getElementById('session-id-display').textContent =
+    STATE.sessionId.slice(0, 12) + (STATE.sessionId.length > 12 ? '…' : '');
+
+  // Load problem
+  if (STATE.problemId) {
+    await loadProblem(STATE.problemId);
+  } else {
+    loadDemoProblem();
+  }
+
+  // Load subscription info
+  await loadSubscription();
+
+  // Start timer
+  startTimer();
+
+  // Init proctor WebSocket
+  initProctorWS();
+
+  // Tab visibility / window blur detection
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) reportCheatEvent('tab_switch', 'Browser tab switched');
+  });
+  window.addEventListener('blur', () => {
+    reportCheatEvent('window_blur', 'Browser window lost focus');
+  });
+}
+
+// ── Problem loading ────────────────────────────────────
+async function loadProblem(problemId) {
+  try {
+    const resp = await fetch(`/dsa/problems/${problemId}`);
+    if (!resp.ok) throw new Error('Problem not found');
+    const { data: prob } = await resp.json();
+    renderProblem(prob);
+  } catch (e) {
+    loadDemoProblem();
+  }
+}
+
+function loadDemoProblem() {
+  const demo = {
+    id: 'demo_two_sum',
+    title: 'Two Sum',
+    difficulty: 'easy',
+    problem_type: 'dsa',
+    description: `Given an array of integers \`nums\` and an integer \`target\`, return **indices** of the two numbers such that they add up to \`target\`.
+
+You may assume that each input would have **exactly one solution**, and you may not use the same element twice.
+
+### Constraints
+- \`2 ≤ nums.length ≤ 10⁴\`
+- \`-10⁹ ≤ nums[i] ≤ 10⁹\`
+- \`-10⁹ ≤ target ≤ 10⁹\`
+`,
+    examples: [
+      { input: 'nums = [2,7,11,15], target = 9', expected_output: '[0,1]', is_sample: true, explanation: 'nums[0] + nums[1] = 2 + 7 = 9' },
+      { input: 'nums = [3,2,4], target = 6',      expected_output: '[1,2]', is_sample: true, explanation: '' },
+    ],
+    tags: ['Array', 'Hash Table'],
+  };
+  renderProblem(demo);
+}
+
+function renderProblem(prob) {
+  STATE.problemId   = prob.id;
+  STATE.problemType = prob.problem_type || 'dsa';
+
+  document.getElementById('problem-title').textContent = prob.title;
+
+  const badge = document.getElementById('difficulty-badge');
+  badge.textContent = prob.difficulty.charAt(0).toUpperCase() + prob.difficulty.slice(1);
+  badge.className = `difficulty-badge diff-${prob.difficulty}`;
+
+  document.getElementById('problem-body').innerHTML =
+    marked.parse(prob.description || '');
+
+  // Tags
+  const tagsEl = document.getElementById('tags-container');
+  tagsEl.innerHTML = (prob.tags || []).map(t => `<span class="tag">${t}</span>`).join('');
+
+  // Examples tab
+  const examplesEl = document.getElementById('examples-body');
+  examplesEl.innerHTML = (prob.examples || [])
+    .filter(e => e.is_sample)
+    .map((ex, i) => `
+      <div style="margin-bottom:16px;">
+        <div style="font-weight:600;margin-bottom:6px;color:var(--muted);font-size:12px;">EXAMPLE ${i+1}</div>
+        <pre><strong>Input:</strong>  ${ex.input}\n<strong>Output:</strong> ${ex.expected_output}${ex.explanation ? '\n<strong>Explanation:</strong> ' + ex.explanation : ''}</pre>
+      </div>
+    `).join('');
+
+  // SQL: switch language to SQL by default
+  if (prob.problem_type === 'sql') {
+    document.getElementById('lang-select').value = 'sql';
+    onLangChange();
+  }
+
+  // Set starter code if available
+  if (prob.starter_code && prob.starter_code[STATE.language]) {
+    editor.setValue(prob.starter_code[STATE.language]);
+  }
+}
+
+// ── Subscription display ───────────────────────────────
+async function loadSubscription() {
+  try {
+    const resp = await fetch(`/subscription/${STATE.recruiterId}`);
+    if (!resp.ok) return;
+    const { data } = await resp.json();
+    document.getElementById('tier-display').textContent = data.display_name || 'Free';
+  } catch {
+    document.getElementById('tier-display').textContent = 'Free';
+  }
+}
+
+// ── Timer ──────────────────────────────────────────────
+function startTimer() {
+  updateTimerDisplay();
+  STATE.timerInterval = setInterval(() => {
+    STATE.timerSec--;
+    if (STATE.timerSec <= 0) {
+      clearInterval(STATE.timerInterval);
+      STATE.timerSec = 0;
+      onTimeUp();
+    }
+    updateTimerDisplay();
+    if (STATE.timerSec <= 300) {
+      document.getElementById('timer').classList.add('urgent');
+    }
+  }, 1000);
+}
+
+function updateTimerDisplay() {
+  const m = Math.floor(STATE.timerSec / 60).toString().padStart(2, '0');
+  const s = (STATE.timerSec % 60).toString().padStart(2, '0');
+  document.getElementById('timer').textContent = `${m}:${s}`;
+}
+
+function onTimeUp() {
+  showToast('Time is up! Submitting your best attempt…', 'warn');
+  submitCode(true);
+}
+
+// ── Code execution ─────────────────────────────────────
+async function runCode() {
+  if (STATE.kicked) return;
+  setButtonsLoading(true);
+  showOutputLoading('Running test cases…');
+
+  const code = editor.getValue();
+  const lang = STATE.language;
+
+  try {
+    const resp = await fetch('/dsa/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session_id:   STATE.sessionId,
+        problem_id:   STATE.problemId,
+        language:     lang,
+        source_code:  code,
+        sample_only:  true,   // only run sample test cases
+      }),
+    });
+    const data = await resp.json();
+    if (data.success) {
+      renderTestResults(data.data.test_results, data.data.status);
+    } else {
+      showOutputError(data.error?.message || 'Execution failed');
+    }
+  } catch (e) {
+    showOutputError('Network error — check connection');
+  } finally {
+    setButtonsLoading(false);
+  }
+}
+
+async function submitCode(forced = false) {
+  if (STATE.kicked) return;
+  setButtonsLoading(true);
+  showOutputLoading('Submitting… running all test cases…');
+
+  const code = editor.getValue();
+  const lang = STATE.language;
+
+  try {
+    const resp = await fetch(`/dsa/sessions/${STATE.sessionId}/submit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        problem_id:  STATE.problemId,
+        language:    lang,
+        source_code: code,
+      }),
+    });
+    const data = await resp.json();
+    if (data.success) {
+      const sub = data.data;
+      STATE.submissions.push(sub);
+      renderSubmissionResult(sub);
+      updateSubmissionsTab();
+      if (sub.status === 'accepted') {
+        showToast('All test cases passed! 🎉', 'ok');
+      }
+    } else {
+      showOutputError(data.error?.message || 'Submission failed');
+    }
+  } catch (e) {
+    showOutputError('Network error — check connection');
+  } finally {
+    setButtonsLoading(false);
+  }
+}
+
+// ── Output rendering ───────────────────────────────────
+function showOutputLoading(msg) {
+  document.getElementById('output-body').innerHTML =
+    `<div><span class="loader"></span> ${msg}</div>`;
+}
+
+function showOutputError(msg) {
+  document.getElementById('output-body').innerHTML =
+    `<div style="color:var(--red)">${msg}</div>`;
+}
+
+function renderTestResults(results, status) {
+  if (!results || results.length === 0) {
+    showOutputError('No test results returned');
+    return;
+  }
+  const passed = results.filter(r => r.passed).length;
+  const total  = results.length;
+  const pct    = Math.round(passed / total * 100);
+  const cls    = passed === total ? 'score-accepted' : (passed > 0 ? 'score-partial' : 'score-fail');
+
+  let html = `
+    <div class="score-banner">
+      <div class="score-num ${cls}">${passed}/${total}</div>
+      <div style="color:var(--muted);font-size:13px;">test cases passed (${pct}%)</div>
+    </div>
+  `;
+
+  results.forEach((r, i) => {
+    const icon  = r.passed ? '✅' : '❌';
+    const cls2  = r.passed ? 'result-pass' : 'result-fail';
+    html += `
+      <div class="result-row">
+        <span class="result-icon">${icon}</span>
+        <div>
+          <div class="${cls2}">Test ${i + 1} — ${r.passed ? 'Passed' : 'Failed'}</div>
+          ${!r.passed ? `
+            <div class="result-detail">Expected: <span>${escHtml(r.expected_output)}</span></div>
+            <div class="result-detail">Got: <span>${escHtml(r.actual_output || '(empty)')}</span></div>
+            ${r.error ? `<div class="result-detail" style="color:var(--red)">${escHtml(r.error)}</div>` : ''}
+          ` : ''}
+          ${r.runtime_ms != null ? `<div class="result-detail">Runtime: <span>${r.runtime_ms.toFixed(1)}ms</span></div>` : ''}
+        </div>
+      </div>
+    `;
+  });
+
+  document.getElementById('output-body').innerHTML = html;
+}
+
+function renderSubmissionResult(sub) {
+  renderTestResults(sub.test_results, sub.status);
+}
+
+function updateSubmissionsTab() {
+  const el = document.getElementById('submissions-body');
+  el.innerHTML = STATE.submissions.map((s, i) => `
+    <div style="padding:10px 0;border-bottom:1px solid var(--border);">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span style="color:${s.status === 'accepted' ? 'var(--green)' : 'var(--red)'}">
+          ${s.status === 'accepted' ? '✅' : '❌'} ${s.status.replace(/_/g,' ').toUpperCase()}
+        </span>
+        <span style="color:var(--muted);font-size:12px;">${s.language}</span>
+      </div>
+      <div style="color:var(--muted);font-size:12px;margin-top:4px;">
+        ${s.passed_count}/${s.total_count} tests · ${s.score_pct?.toFixed(1)}%
+        ${s.runtime_ms ? ` · ${s.runtime_ms.toFixed(0)}ms` : ''}
+      </div>
+    </div>
+  `).join('');
+}
+
+function setButtonsLoading(loading) {
+  document.getElementById('btn-run').disabled    = loading;
+  document.getElementById('btn-submit').disabled = loading;
+}
+
+// ── Proctor WebSocket ──────────────────────────────────
+function initProctorWS() {
+  const wsUrl = `ws://${location.host}/dsa/proctor-ws/${STATE.sessionId}`;
+  try {
+    STATE.wsProctor = new WebSocket(wsUrl);
+    STATE.wsProctor.onopen  = () => updatePipStatus('Monitoring active', false);
+    STATE.wsProctor.onmessage = (e) => handleProctorMessage(JSON.parse(e.data));
+    STATE.wsProctor.onclose = () => updatePipStatus('Reconnecting…', false);
+    STATE.wsProctor.onerror = () => updatePipStatus('Connection error', true);
+  } catch {
+    updatePipStatus('Monitoring offline', true);
+  }
+}
+
+function handleProctorMessage(msg) {
+  if (msg.type === 'warning') {
+    showCheatWarning(msg.text, msg.strike);
+  } else if (msg.type === 'kicked') {
+    showKicked(msg.text);
+  } else if (msg.type === 'avatar_url' && msg.url) {
+    // Embed avatar stream in PiP
+    const pipVideo = document.getElementById('pip-video');
+    pipVideo.innerHTML = `<iframe src="${escHtml(msg.url)}" allow="camera; microphone" frameborder="0"></iframe>`;
+  }
+}
+
+function reportCheatEvent(eventType, detail) {
+  if (STATE.kicked) return;
+  if (STATE.wsProctor && STATE.wsProctor.readyState === WebSocket.OPEN) {
+    STATE.wsProctor.send(JSON.stringify({
+      type:       'cheat_event',
+      event_type: eventType,
+      detail:     detail,
+      session_id: STATE.sessionId,
+    }));
+  } else {
+    // HTTP fallback
+    fetch(`/dsa/sessions/${STATE.sessionId}/cheat-event`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ event_type: eventType, detail }),
+    }).then(r => r.json()).then(d => {
+      if (d.success && d.data.warning_text) {
+        showCheatWarning(d.data.warning_text, d.data.strike);
+      }
+      if (d.success && d.data.kicked) showKicked();
+    }).catch(() => {});
+  }
+}
+
+// ── Strike / proctoring UI ─────────────────────────────
+function showCheatWarning(text, strikeLevel) {
+  STATE.strikeCount++;
+
+  // Update strike dots
+  ['s1','s2','s3'].forEach((id, i) => {
+    document.getElementById(id).classList.toggle('active', i < STATE.strikeCount);
+  });
+
+  // Flash border
+  const overlay = document.getElementById('warning-overlay');
+  overlay.style.display = 'block';
+  document.getElementById('pip-dot').classList.add('alert');
+  setTimeout(() => {
+    overlay.style.display = 'none';
+    document.getElementById('pip-dot').classList.remove('alert');
+  }, 2000);
+
+  showToast(`⚠️ Strike ${STATE.strikeCount}: ${text}`, 'warn', 6000);
+  updatePipStatus(`⚠️ Strike ${STATE.strikeCount}/3`, true);
+}
+
+function showKicked(message) {
+  STATE.kicked = true;
+  clearInterval(STATE.timerInterval);
+  document.getElementById('kicked-modal').classList.add('show');
+  if (message) {
+    document.getElementById('kicked-message').textContent = message;
+  }
+  ['s1','s2','s3'].forEach(id => document.getElementById(id).classList.add('active'));
+}
+
+function updatePipStatus(msg, alert) {
+  document.getElementById('proctor-status').textContent = msg;
+  if (alert) document.getElementById('pip-dot').classList.add('alert');
+}
+
+// ── PiP drag ──────────────────────────────────────────
+(function () {
+  const pip = document.getElementById('proctor-pip');
+  const header = document.getElementById('pip-header');
+  let dragging = false, ox = 0, oy = 0;
+
+  header.addEventListener('mousedown', e => {
+    dragging = true;
+    ox = e.clientX - pip.offsetLeft;
+    oy = e.clientY - pip.offsetTop;
+    pip.style.right = '';
+    pip.style.bottom = '';
+  });
+  document.addEventListener('mousemove', e => {
+    if (!dragging) return;
+    pip.style.left = (e.clientX - ox) + 'px';
+    pip.style.top  = (e.clientY - oy) + 'px';
+  });
+  document.addEventListener('mouseup', () => dragging = false);
+})();
+
+// ── Toast helper ───────────────────────────────────────
+function showToast(msg, type = '', duration = 4000) {
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.textContent = msg;
+  document.getElementById('toast-container').appendChild(el);
+  setTimeout(() => el.remove(), duration);
+}
+
+// ── Utility ────────────────────────────────────────────
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+</script>
+</body>
+</html>

@@ -54,6 +54,18 @@ from utils.logger import logger
 # to avoid reading GROQ_API_KEY before load_dotenv() runs.
 from pipelines.interview_flow import InterviewPipeline
 
+# DSA platform imports (lazy to avoid circular deps at import time)
+from models.dsa_problem import (
+    CheatEventType,
+    DSAProblem,
+    DSASession,
+    ProblemDifficulty,
+    ProblemType,
+    ProgrammingLanguage,
+    TestCase,
+)
+from models.subscription import Feature, TierType, TIER_CONFIGS
+
 
 # ─────────────────────────────────────────────────────
 #  App Setup
@@ -959,3 +971,500 @@ async def update_pipeline_settings(
 
     logger.info(f"PORTAL | /settings/pipeline | Updated: {_pipeline_config}")
     return {"success": True, "config": _pipeline_config}
+
+
+# ═══════════════════════════════════════════════════════
+#  DSA PLATFORM — Feature Gate + Code Execution Routes
+# ═══════════════════════════════════════════════════════
+
+# Lazy singletons for DSA subsystem
+_dsa_pipeline   = None
+_feature_gate   = None
+_dsa_sessions:  dict[str, DSASession] = {}      # session_id → DSASession (in-memory)
+_dsa_problems:  dict[str, DSAProblem] = {}      # problem_id → DSAProblem (in-memory seed)
+
+
+def _get_feature_gate():
+    global _feature_gate
+    if _feature_gate is None:
+        from connectors.feature_gate import FeatureGate
+        _feature_gate = FeatureGate()
+    return _feature_gate
+
+
+def _get_dsa_pipeline():
+    global _dsa_pipeline
+    if _dsa_pipeline is None:
+        from pipelines.dsa_interview_flow import DSAInterviewPipeline
+        _dsa_pipeline = DSAInterviewPipeline(feature_gate=_get_feature_gate())
+    return _dsa_pipeline
+
+
+def _seed_demo_problems():
+    """Populate a small in-memory problem bank for demo / dev use."""
+    if _dsa_problems:
+        return
+    _dsa_problems["demo_two_sum"] = DSAProblem(
+        id="demo_two_sum",
+        title="Two Sum",
+        slug="two-sum",
+        difficulty=ProblemDifficulty.EASY,
+        problem_type=ProblemType.DSA,
+        description=(
+            "Given an array of integers `nums` and an integer `target`, return **indices** "
+            "of the two numbers such that they add up to `target`.\n\n"
+            "You may assume exactly one solution exists."
+        ),
+        constraints="2 ≤ nums.length ≤ 10⁴\n-10⁹ ≤ nums[i] ≤ 10⁹",
+        examples=[
+            TestCase(
+                input="[2,7,11,15]\n9",
+                expected_output="0 1",
+                is_sample=True,
+                explanation="nums[0] + nums[1] = 2 + 7 = 9",
+            ),
+        ],
+        hidden_tests=[
+            TestCase(input="[3,2,4]\n6",     expected_output="1 2"),
+            TestCase(input="[3,3]\n6",        expected_output="0 1"),
+        ],
+        tags=["Array", "Hash Table"],
+        time_limit_ms=5000,
+        memory_limit_mb=256,
+    )
+    _dsa_problems["demo_select_dept"] = DSAProblem(
+        id="demo_select_dept",
+        title="Employees by Department",
+        slug="employees-by-department",
+        difficulty=ProblemDifficulty.EASY,
+        problem_type=ProblemType.SQL,
+        description=(
+            "Write a SQL query to return all employees in the **Engineering** department, "
+            "ordered by `name` ascending."
+        ),
+        schema_sql=(
+            "CREATE TABLE employees (id INTEGER, name TEXT, department TEXT, salary INTEGER);\n"
+            "INSERT INTO employees VALUES (1,'Alice','Engineering',120000);\n"
+            "INSERT INTO employees VALUES (2,'Bob','Marketing',90000);\n"
+            "INSERT INTO employees VALUES (3,'Carol','Engineering',115000);\n"
+        ),
+        examples=[
+            TestCase(
+                input="SELECT query on employees",
+                expected_output="1|Alice|Engineering|120000\n3|Carol|Engineering|115000",
+                is_sample=True,
+            ),
+        ],
+        hidden_tests=[
+            TestCase(
+                input="",
+                expected_output="1|Alice|Engineering|120000\n3|Carol|Engineering|115000",
+            ),
+        ],
+        tags=["SQL", "SELECT", "ORDER BY"],
+    )
+
+
+# ── GET /dsa/problems ─────────────────────────────────
+
+@app.get("/dsa/problems", tags=["DSA Platform"], summary="List available DSA/SQL problems")
+async def list_dsa_problems():
+    """Return all problems in the bank (id, title, difficulty, type, tags)."""
+    _seed_demo_problems()
+    problems = [
+        {
+            "id":           p.id,
+            "title":        p.title,
+            "slug":         p.slug,
+            "difficulty":   p.difficulty.value,
+            "problem_type": p.problem_type.value,
+            "tags":         p.tags,
+        }
+        for p in _dsa_problems.values()
+    ]
+    return {"success": True, "data": problems}
+
+
+# ── GET /dsa/problems/{problem_id} ───────────────────
+
+@app.get("/dsa/problems/{problem_id}", tags=["DSA Platform"], summary="Get a DSA/SQL problem")
+async def get_dsa_problem(problem_id: str):
+    """Return full problem details (description, examples, starter code)."""
+    _seed_demo_problems()
+    prob = _dsa_problems.get(problem_id)
+    if not prob:
+        raise HTTPException(status_code=404, detail=f"Problem '{problem_id}' not found")
+    # Return only sample tests (not hidden)
+    result = prob.dict()
+    result["hidden_tests"] = []   # never expose to candidate
+    return {"success": True, "data": result}
+
+
+# ── POST /dsa/sessions ────────────────────────────────
+
+@app.post("/dsa/sessions", tags=["DSA Platform"], summary="Start a DSA interview session")
+async def start_dsa_session(
+    recruiter_id: str  = Form(...),
+    applicant_id: str  = Form(...),
+    problem_id:   str  = Form(...),
+    language:     str  = Form(default="python3"),
+    duration_min: int  = Form(default=90, ge=15, le=240),
+):
+    """
+    Gate-check subscription tier, then create a DSA session.
+    Returns session_id and problem details.
+    """
+    _seed_demo_problems()
+    prob = _dsa_problems.get(problem_id)
+    if not prob:
+        raise HTTPException(status_code=404, detail=f"Problem '{problem_id}' not found")
+
+    try:
+        lang = ProgrammingLanguage(language)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Unknown language: {language}")
+
+    session, gate = await _get_dsa_pipeline().start(
+        recruiter_id=recruiter_id,
+        applicant_id=applicant_id,
+        problem=prob,
+        duration_min=duration_min,
+    )
+
+    if not gate.allowed:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code":    "DSA_GATE_001",
+                "message": gate.reason,
+                "tier":    gate.tier.value,
+            },
+        )
+
+    session.language = lang
+    _dsa_sessions[session.id] = session
+
+    return {
+        "success":    True,
+        "data": {
+            "session_id":  session.id,
+            "problem_id":  prob.id,
+            "problem_title": prob.title,
+            "language":    lang.value,
+            "duration_min": duration_min,
+            "platform_url": f"/dsa/platform?session={session.id}&applicant={applicant_id}&recruiter={recruiter_id}&problem={problem_id}",
+            "tier":        gate.tier.value,
+            "remaining":   gate.remaining,
+        },
+    }
+
+
+# ── POST /dsa/run ─────────────────────────────────────
+
+@app.post("/dsa/run", tags=["DSA Platform"], summary="Run code against sample test cases only")
+async def run_code(
+    session_id:  str  = Form(...),
+    problem_id:  str  = Form(...),
+    language:    str  = Form(...),
+    source_code: str  = Form(...),
+    sample_only: bool = Form(default=True),
+):
+    """
+    Execute code/SQL against sample test cases only (no hidden tests revealed).
+    Used by the ▶ Run button in the platform UI.
+    """
+    _seed_demo_problems()
+    prob = _dsa_problems.get(problem_id)
+    if not prob:
+        raise HTTPException(status_code=404, detail="Problem not found")
+
+    session = _dsa_sessions.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    try:
+        lang = ProgrammingLanguage(language)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Unknown language: {language}")
+
+    session.language = lang
+
+    # Build a temporary DSASession-like object for the pipeline call
+    from models.dsa_problem import CodeSubmission as _CS, DSASession as _DS
+    tmp_session = _DS(
+        id=session_id,
+        applicant_id=session.applicant_id,
+        recruiter_id=session.recruiter_id,
+        problem_id=problem_id,
+        language=lang,
+    )
+
+    # Only run sample (visible) tests for the ▶ Run action
+    import copy
+    run_prob = copy.copy(prob)
+    run_prob.hidden_tests = []
+
+    sub = await _get_dsa_pipeline().submit_code(tmp_session, run_prob, source_code)
+
+    return {
+        "success": True,
+        "data": {
+            "status":       sub.status.value,
+            "passed_count": sub.passed_count,
+            "total_count":  sub.total_count,
+            "score_pct":    sub.score_pct,
+            "runtime_ms":   sub.runtime_ms,
+            "test_results": [r.dict() for r in sub.test_results],
+        },
+    }
+
+
+# ── POST /dsa/sessions/{id}/submit ───────────────────
+
+@app.post(
+    "/dsa/sessions/{session_id}/submit",
+    tags=["DSA Platform"],
+    summary="Submit code — run all hidden tests",
+)
+async def submit_code(
+    session_id:  str,
+    problem_id:  str  = Form(...),
+    language:    str  = Form(...),
+    source_code: str  = Form(...),
+):
+    """
+    Submit code/SQL against ALL test cases (including hidden ones).
+    Scores the submission and records it in the session.
+    """
+    _seed_demo_problems()
+    session = _dsa_sessions.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    prob = _dsa_problems.get(problem_id or session.problem_id)
+    if not prob:
+        raise HTTPException(status_code=404, detail="Problem not found")
+
+    try:
+        lang = ProgrammingLanguage(language)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Unknown language: {language}")
+
+    session.language = lang
+    sub = await _get_dsa_pipeline().submit_code(session, prob, source_code)
+    session.submissions.append(sub.id)
+    if sub.score_pct > session.best_score_pct:
+        session.best_score_pct = sub.score_pct
+
+    return {
+        "success": True,
+        "data": {
+            "submission_id": sub.id,
+            "status":        sub.status.value,
+            "passed_count":  sub.passed_count,
+            "total_count":   sub.total_count,
+            "score_pct":     sub.score_pct,
+            "runtime_ms":    sub.runtime_ms,
+            "test_results":  [
+                {
+                    "test_index":      r.test_index,
+                    "passed":          r.passed,
+                    "runtime_ms":      r.runtime_ms,
+                    "memory_kb":       r.memory_kb,
+                    # Never reveal expected output for hidden tests
+                    "actual_output":   r.actual_output if r.passed else "(hidden)",
+                    "expected_output": r.expected_output if r.passed else "(hidden)",
+                    "error":           r.error,
+                }
+                for r in sub.test_results
+            ],
+        },
+    }
+
+
+# ── POST /dsa/sessions/{id}/cheat-event ──────────────
+
+@app.post(
+    "/dsa/sessions/{session_id}/cheat-event",
+    tags=["DSA Platform"],
+    summary="Report a proctoring event (tab switch, paste, etc.)",
+)
+async def report_cheat_event(
+    session_id: str,
+    event_type: str = Form(...),
+    detail:     str = Form(default=""),
+):
+    """
+    Frontend reports suspicious activity; proctor agent applies strike system.
+    Returns warning text (for TTS) and kicked flag.
+    """
+    session = _dsa_sessions.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    try:
+        evt = CheatEventType(event_type)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Unknown event type: {event_type}")
+
+    prob = _dsa_problems.get(session.problem_id, None)
+    prob_title = prob.title if prob else ""
+
+    state, warning_text, kicked = await _get_dsa_pipeline().handle_cheat_event(
+        session=session,
+        event_type=evt,
+        detail=detail,
+        problem_title=prob_title,
+    )
+
+    if kicked:
+        session.status = __import__('models.dsa_problem', fromlist=['DSASessionStatus']).DSASessionStatus.KICKED
+
+    logger.info(
+        f"PORTAL | /dsa/sessions/{session_id}/cheat-event | "
+        f"{event_type} | strike={state.strike_count} | kicked={kicked}"
+    )
+
+    return {
+        "success": True,
+        "data": {
+            "strike":       state.strike_count,
+            "strike_level": state.strike_level.value,
+            "warning_text": warning_text,
+            "kicked":       kicked,
+        },
+    }
+
+
+# ── GET /dsa/sessions/{id} ────────────────────────────
+
+@app.get(
+    "/dsa/sessions/{session_id}",
+    tags=["DSA Platform"],
+    summary="Get DSA session status",
+)
+async def get_dsa_session(session_id: str):
+    session = _dsa_sessions.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return {
+        "success": True,
+        "data": {
+            "session_id":    session.id,
+            "status":        session.status.value,
+            "strike_count":  session.strike_count,
+            "strike_level":  session.strike_level.value,
+            "best_score_pct": session.best_score_pct,
+            "language":      session.language.value,
+            "submissions":   session.submissions,
+            "started_at":    session.started_at.isoformat(),
+            "ended_at":      session.ended_at.isoformat() if session.ended_at else None,
+        },
+    }
+
+
+# ── DELETE /dsa/sessions/{id} (end session) ───────────
+
+@app.delete(
+    "/dsa/sessions/{session_id}",
+    tags=["DSA Platform"],
+    summary="End a DSA session",
+)
+async def end_dsa_session(session_id: str):
+    session = _dsa_sessions.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    await _get_dsa_pipeline().end(session, [])
+    return {
+        "success": True,
+        "data": {
+            "session_id":    session.id,
+            "status":        session.status.value,
+            "best_score_pct": session.best_score_pct,
+        },
+    }
+
+
+# ── GET /subscription/{recruiter_id} ─────────────────
+
+@app.get(
+    "/subscription/{recruiter_id}",
+    tags=["Subscription"],
+    summary="Get subscription status and feature limits",
+)
+async def get_subscription(recruiter_id: str):
+    """
+    Returns current tier, enabled features, daily limits,
+    today's usage, and per-recruiter feature toggles.
+    """
+    status_obj = await _get_feature_gate().get_status(recruiter_id)
+    return {"success": True, "data": status_obj.dict()}
+
+
+# ── GET /pricing ──────────────────────────────────────
+
+@app.get("/pricing", tags=["Subscription"], summary="Return all subscription tiers and pricing")
+async def get_pricing():
+    """Returns tier display info for the pricing page."""
+    tiers = []
+    for tier, cfg in TIER_CONFIGS.items():
+        tiers.append({
+            "tier":          cfg.tier.value,
+            "display_name":  cfg.display_name,
+            "price_monthly": cfg.price_monthly,
+            "description":   cfg.description,
+            "features": {
+                feat: getattr(cfg.features, feat, False)
+                for feat in vars(cfg.features)
+                if not feat.startswith("_")
+            },
+            "limits": {
+                feat: getattr(cfg.limits, feat, 0)
+                for feat in vars(cfg.limits)
+                if not feat.startswith("_") and feat != "get"
+            },
+            "contact":  "aakarshkumar241@gmail.com" if tier == TierType.ENTERPRISE else None,
+        })
+    return {"success": True, "data": tiers}
+
+
+# ── GET/PATCH /settings/features ─────────────────────
+
+@app.get(
+    "/settings/features/{recruiter_id}",
+    tags=["Settings"],
+    summary="Get per-recruiter feature toggles (MAX/ENTERPRISE only)",
+)
+async def get_feature_toggles(recruiter_id: str):
+    status_obj = await _get_feature_gate().get_status(recruiter_id)
+    return {"success": True, "data": {"toggles": status_obj.toggles, "tier": status_obj.tier.value}}
+
+
+@app.patch(
+    "/settings/features/{recruiter_id}",
+    tags=["Settings"],
+    summary="Toggle a feature on/off (MAX/ENTERPRISE only)",
+)
+async def set_feature_toggle(
+    recruiter_id: str,
+    feature:      str  = Form(...),
+    enabled:      bool = Form(...),
+    note:         str  = Form(default=""),
+):
+    """
+    Enable or disable a feature for this recruiter account.
+    Only works on MAX or ENTERPRISE tier — ignored on FREE/PRO.
+    """
+    try:
+        feat = Feature(feature)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Unknown feature: {feature}")
+
+    ok = await _get_feature_gate().set_toggle(recruiter_id, feat, enabled, note)
+    if not ok:
+        raise HTTPException(
+            status_code=403,
+            detail="Feature toggles require MAX or ENTERPRISE plan.",
+        )
+    return {"success": True, "data": {"feature": feature, "enabled": enabled}}

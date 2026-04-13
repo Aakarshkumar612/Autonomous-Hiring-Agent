@@ -462,6 +462,112 @@ class SupabaseStore:
         print(SCHEMA_SQL)
         print("="*60 + "\n")
 
+    # ── Subscription / Feature Gate ───────────────────
+
+    def get_subscription(self, recruiter_id: str) -> Optional[dict]:
+        """Return subscription row for a recruiter, or None."""
+        if not self.is_connected():
+            return None
+        try:
+            resp = self.client.table("subscriptions").select("*").eq(
+                "recruiter_id", recruiter_id
+            ).limit(1).execute()
+            return resp.data[0] if resp.data else None
+        except Exception as exc:
+            logger.warning(f"SUPABASE | get_subscription failed: {exc}")
+            return None
+
+    def get_feature_usage_today(self, recruiter_id: str, feature: str) -> int:
+        """Return today's usage count for a feature. Returns 0 on error."""
+        from datetime import date
+        if not self.is_connected():
+            return 0
+        today = date.today().isoformat()
+        try:
+            resp = self.client.table("usage_records").select("count").eq(
+                "recruiter_id", recruiter_id
+            ).eq("feature", feature).eq("date", today).limit(1).execute()
+            if resp.data:
+                return int(resp.data[0].get("count", 0))
+            return 0
+        except Exception as exc:
+            logger.warning(f"SUPABASE | get_feature_usage_today failed: {exc}")
+            return 0
+
+    def increment_feature_usage(self, recruiter_id: str, feature: str) -> bool:
+        """Upsert today's usage count +1 for (recruiter_id, feature)."""
+        from datetime import date
+        if not self.is_connected():
+            return False
+        today = date.today().isoformat()
+        current = self.get_feature_usage_today(recruiter_id, feature)
+        try:
+            self.client.table("usage_records").upsert({
+                "recruiter_id": recruiter_id,
+                "feature":      feature,
+                "date":         today,
+                "count":        current + 1,
+            }).execute()
+            return True
+        except Exception as exc:
+            logger.warning(f"SUPABASE | increment_feature_usage failed: {exc}")
+            return False
+
+    def get_feature_toggle(self, recruiter_id: str, feature: str) -> Optional[dict]:
+        """Return toggle row, or None if no override set."""
+        if not self.is_connected():
+            return None
+        try:
+            resp = self.client.table("feature_toggles").select("*").eq(
+                "recruiter_id", recruiter_id
+            ).eq("feature", feature).limit(1).execute()
+            return resp.data[0] if resp.data else None
+        except Exception as exc:
+            logger.warning(f"SUPABASE | get_feature_toggle failed: {exc}")
+            return None
+
+    def set_feature_toggle(
+        self, recruiter_id: str, feature: str, enabled: bool, note: str = ""
+    ) -> bool:
+        """Upsert a per-recruiter feature toggle."""
+        from datetime import datetime as _dt
+        if not self.is_connected():
+            return False
+        try:
+            self.client.table("feature_toggles").upsert({
+                "recruiter_id": recruiter_id,
+                "feature":      feature,
+                "enabled":      enabled,
+                "note":         note,
+                "updated_at":   _dt.utcnow().isoformat(),
+            }).execute()
+            return True
+        except Exception as exc:
+            logger.warning(f"SUPABASE | set_feature_toggle failed: {exc}")
+            return False
+
+    def save_dsa_submission(self, submission: dict) -> bool:
+        """Persist a DSA code submission to Supabase."""
+        if not self.is_connected():
+            return False
+        try:
+            self.client.table("dsa_submissions").upsert(submission).execute()
+            return True
+        except Exception as exc:
+            logger.warning(f"SUPABASE | save_dsa_submission failed: {exc}")
+            return False
+
+    def save_proctor_event(self, event: dict) -> bool:
+        """Persist a proctoring event to Supabase."""
+        if not self.is_connected():
+            return False
+        try:
+            self.client.table("proctor_events").insert(event).execute()
+            return True
+        except Exception as exc:
+            logger.warning(f"SUPABASE | save_proctor_event failed: {exc}")
+            return False
+
 
 # ─────────────────────────────────────────────────────
 #  Global Instance
