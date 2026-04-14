@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HireIQ — Platform Harness</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg:     #0d1117; --bg2: #161b22; --bg3: #21262d;
+      --border: #30363d; --text: #e6edf3; --muted: #8b949e;
+      --accent: #58a6ff; --green: #3fb950; --yellow: #d29922;
+      --red:    #f85149; --orange: #e3b341; --purple: #bc8cff;
+      --radius: 8px; --mono: 'SF Mono','Fira Code',monospace;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; font-size: 14px; }
+
+    header {
+      background: var(--bg2); border-bottom: 1px solid var(--border);
+      padding: 0 28px; height: 56px; display: flex; align-items: center; gap: 12px;
+      position: sticky; top: 0; z-index: 100;
+    }
+    .logo { font-size: 17px; font-weight: 700; color: var(--accent); }
+    .logo span { color: var(--muted); font-weight: 400; }
+    header .sep { flex: 1; }
+    #status-badge {
+      padding: 4px 14px; border-radius: 20px; font-size: 12px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: .5px;
+      background: var(--bg3); border: 1px solid var(--border); color: var(--muted);
+    }
+    #status-badge.healthy  { background: #0d2718; border-color: #1a4a2a; color: var(--green); }
+    #status-badge.degraded { background: #2a1f00; border-color: #4a3800; color: var(--yellow); }
+    #status-badge.critical { background: #2a0000; border-color: #4a0000; color: var(--red); }
+    #cycle-info { font-size: 12px; color: var(--muted); font-family: var(--mono); }
+
+    main { max-width: 1320px; margin: 0 auto; padding: 28px 24px 64px; }
+    h1 { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
+    .sub { color: var(--muted); font-size: 13px; margin-bottom: 28px; }
+
+    /* ── Metric cards ── */
+    .cards { display: grid; grid-template-columns: repeat(5,1fr); gap: 14px; margin-bottom: 28px; }
+    @media(max-width:1000px){ .cards{ grid-template-columns:repeat(3,1fr);} }
+    @media(max-width:600px) { .cards{ grid-template-columns:repeat(2,1fr);} }
+    .card {
+      background: var(--bg2); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 18px;
+    }
+    .card-label { font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); margin-bottom: 8px; }
+    .card-value { font-size: 28px; font-weight: 700; line-height: 1; font-family: var(--mono); }
+    .card-sub   { font-size: 11px; color: var(--muted); margin-top: 4px; }
+    .c-green .card-value  { color: var(--green); }
+    .c-yellow .card-value { color: var(--yellow); }
+    .c-red .card-value    { color: var(--red); }
+    .c-blue .card-value   { color: var(--accent); }
+    .c-purple .card-value { color: var(--purple); }
+
+    /* ── Sections ── */
+    .section { margin-bottom: 28px; }
+    .section-title {
+      font-size: 14px; font-weight: 600; margin-bottom: 14px;
+      padding-bottom: 10px; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 8px;
+    }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); display: inline-block; }
+
+    /* ── Service grid ── */
+    .services-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 14px; }
+    @media(max-width:800px){ .services-grid{ grid-template-columns:1fr 1fr;} }
+    @media(max-width:500px){ .services-grid{ grid-template-columns:1fr;} }
+
+    .svc-card {
+      background: var(--bg2); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 18px;
+      position: relative; overflow: hidden;
+    }
+    .svc-card::before {
+      content: ''; position: absolute; left: 0; top: 0; bottom: 0;
+      width: 3px;
+    }
+    .svc-card.ok::before       { background: var(--green); }
+    .svc-card.degraded::before { background: var(--yellow); }
+    .svc-card.down::before     { background: var(--red); }
+    .svc-card.skipped::before  { background: var(--muted); }
+
+    .svc-name  { font-weight: 600; font-size: 13px; text-transform: uppercase; letter-spacing: .4px; margin-bottom: 8px; }
+    .svc-status {
+      display: inline-block; padding: 2px 10px; border-radius: 12px;
+      font-size: 11px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .4px; margin-bottom: 8px;
+    }
+    .svc-status.ok       { background:#0d2718; color:var(--green); border:1px solid #1a4a2a; }
+    .svc-status.degraded { background:#2a1f00; color:var(--yellow); border:1px solid #4a3800; }
+    .svc-status.down     { background:#2a0000; color:var(--red);    border:1px solid #4a0000; }
+    .svc-status.skipped  { background:var(--bg3); color:var(--muted); border:1px solid var(--border); }
+
+    .svc-latency { font-family: var(--mono); font-size: 13px; color: var(--accent); }
+    .svc-detail  { font-size: 11px; color: var(--muted); margin-top: 6px; word-break: break-word; }
+
+    .cb-pill {
+      display: inline-block; margin-top: 8px;
+      padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: .3px;
+    }
+    .cb-closed    { background:#0d2718; color:var(--green); }
+    .cb-open      { background:#2a0000; color:var(--red); }
+    .cb-half_open { background:#2a1f00; color:var(--yellow); }
+
+    /* ── Alerts ── */
+    .alert-list { display: flex; flex-direction: column; gap: 8px; }
+    .alert-item {
+      display: flex; align-items: flex-start; gap: 10px;
+      padding: 10px 14px;
+      background: #1a1000; border: 1px solid #3a2800;
+      border-radius: 6px; font-size: 13px; color: var(--orange);
+    }
+    .alert-icon { font-size: 15px; flex-shrink: 0; }
+    .no-alerts {
+      padding: 16px; background: var(--bg2); border: 1px solid var(--border);
+      border-radius: 6px; color: var(--green); font-size: 13px;
+      display: flex; align-items: center; gap: 8px;
+    }
+
+    /* ── Chart ── */
+    .chart-card {
+      background: var(--bg2); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 20px;
+    }
+    .chart-title { font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 14px; text-transform: uppercase; letter-spacing: .4px; }
+    .chart-wrap  { position: relative; height: 180px; }
+
+    /* ── Auto-refresh indicator ── */
+    #refresh-bar {
+      position: fixed; bottom: 0; left: 0; right: 0; height: 3px;
+      background: var(--bg3); z-index: 200;
+    }
+    #refresh-fill {
+      height: 100%; background: var(--accent);
+      transition: width 1s linear;
+    }
+
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: var(--bg2); }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">⚡ HireIQ <span>/ Harness</span></div>
+  <div class="sep"></div>
+  <span id="cycle-info">Cycle — | —</span>
+  <span id="status-badge">Loading…</span>
+</header>
+
+<main>
+  <h1>Platform Operations</h1>
+  <p class="sub" id="last-updated">Fetching harness data…</p>
+
+  <!-- Metric cards -->
+  <div class="cards" id="metric-cards">
+    <div class="card c-blue"><div class="card-label">Active DSA Sessions</div><div class="card-value" id="m-dsa">—</div><div class="card-sub">live coding interviews</div></div>
+    <div class="card c-purple"><div class="card-label">Interview Sessions</div><div class="card-value" id="m-iv">—</div><div class="card-sub">active AI interviews</div></div>
+    <div class="card c-green"><div class="card-label">PageIndex</div><div class="card-value" id="m-pi">—</div><div class="card-sub" id="m-pi-sub">applicants indexed</div></div>
+    <div class="card c-yellow"><div class="card-label">Groq Latency</div><div class="card-value" id="m-groq">—</div><div class="card-sub">last LLM ping</div></div>
+    <div class="card c-green"><div class="card-label">Harness Cycle</div><div class="card-value" id="m-cycle">—</div><div class="card-sub">checks completed</div></div>
+  </div>
+
+  <!-- Service health -->
+  <div class="section">
+    <div class="section-title"><span class="dot"></span> Service Health</div>
+    <div class="services-grid" id="services-grid">
+      <div class="card" style="grid-column:1/-1;color:var(--muted);">Loading…</div>
+    </div>
+  </div>
+
+  <!-- Alerts -->
+  <div class="section">
+    <div class="section-title"><span class="dot" style="background:var(--orange)"></span> Active Alerts</div>
+    <div id="alerts-container"><div class="no-alerts">Loading…</div></div>
+  </div>
+
+  <!-- History chart -->
+  <div class="section">
+    <div class="section-title"><span class="dot" style="background:var(--purple)"></span> Cycle History</div>
+    <div class="chart-card">
+      <div class="chart-title">Groq Latency (ms) — last 20 cycles</div>
+      <div class="chart-wrap"><canvas id="chart-latency"></canvas></div>
+    </div>
+  </div>
+
+  <!-- Circuit breakers -->
+  <div class="section">
+    <div class="section-title"><span class="dot" style="background:var(--red)"></span> Circuit Breakers</div>
+    <div class="services-grid" id="cb-grid">
+      <div class="card" style="grid-column:1/-1;color:var(--muted);">Loading…</div>
+    </div>
+  </div>
+</main>
+
+<div id="refresh-bar"><div id="refresh-fill" style="width:100%"></div></div>
+
+<script>
+const REFRESH_SECS = 30;
+let _latencyChart = null;
+
+// ── Fetch & render ──────────────────────────────────────
+async function fetchAll() {
+  const [statusResp, historyResp] = await Promise.all([
+    fetch('/health/detailed').catch(() => null),
+    fetch('/harness/history').catch(() => null),
+  ]);
+
+  const status  = statusResp  ? await statusResp.json().catch(() => null)  : null;
+  const history = historyResp ? await historyResp.json().catch(() => null) : null;
+
+  if (status)  renderStatus(status);
+  if (history) renderHistory(history.cycles || []);
+
+  document.getElementById('last-updated').textContent =
+    `Last updated: ${new Date().toLocaleTimeString()} · auto-refreshes every ${REFRESH_SECS}s`;
+}
+
+function renderStatus(s) {
+  // Header badge
+  const badge = document.getElementById('status-badge');
+  badge.textContent = s.status || 'unknown';
+  badge.className   = s.status || '';
+
+  const cycle = s.cycle ?? '—';
+  const ts    = s.timestamp ? new Date(s.timestamp).toLocaleTimeString() : '—';
+  document.getElementById('cycle-info').textContent = `Cycle #${cycle} · ${ts}`;
+
+  // Metrics
+  const m = s.metrics || {};
+  setEl('m-dsa',   m.active_dsa_sessions ?? '—');
+  setEl('m-iv',    m.active_interview_sessions ?? '—');
+  setEl('m-pi',    m.page_index_size ?? '—');
+  document.getElementById('m-pi-sub').textContent =
+    m.page_index_cap_pct != null
+      ? `${m.page_index_cap_pct.toFixed(1)}% of cap used`
+      : 'applicants indexed';
+
+  const groqMs = m.groq_latency_ms;
+  setEl('m-groq', groqMs != null ? `${groqMs.toFixed(0)}ms` : '—');
+  if (groqMs != null) {
+    document.querySelector('#metric-cards .c-yellow .card-value').style.color =
+      groqMs > 3000 ? 'var(--red)' : groqMs > 1500 ? 'var(--orange)' : 'var(--green)';
+  }
+  setEl('m-cycle', cycle);
+
+  // Services
+  const svcsEl = document.getElementById('services-grid');
+  const svcs   = s.services || {};
+  svcsEl.innerHTML = Object.entries(svcs).map(([name, svc]) => {
+    const latTxt = svc.latency_ms != null ? `${svc.latency_ms.toFixed(0)}ms` : '—';
+    return `
+      <div class="svc-card ${svc.status}">
+        <div class="svc-name">${escHtml(name.replace(/_/g,' '))}</div>
+        <div class="svc-status ${svc.status}">${svc.status}</div>
+        ${svc.latency_ms != null ? `<div class="svc-latency">${latTxt}</div>` : ''}
+        <div class="svc-detail">${escHtml(svc.detail || '')}</div>
+      </div>
+    `;
+  }).join('') || '<div style="color:var(--muted);grid-column:1/-1">No service data</div>';
+
+  // Alerts
+  const alertsEl = document.getElementById('alerts-container');
+  const alerts   = s.alerts || [];
+  if (alerts.length === 0) {
+    alertsEl.innerHTML = '<div class="no-alerts">✅ All systems operational — no alerts</div>';
+  } else {
+    alertsEl.innerHTML = `<div class="alert-list">${
+      alerts.map(a => `
+        <div class="alert-item">
+          <span class="alert-icon">⚠️</span>
+          <span>${escHtml(a)}</span>
+        </div>
+      `).join('')
+    }</div>`;
+  }
+
+  // Circuit breakers
+  const cbEl = document.getElementById('cb-grid');
+  const cbs  = s.circuit_breakers || {};
+  cbEl.innerHTML = Object.entries(cbs).map(([name, cb]) => `
+    <div class="svc-card ${cb.state === 'closed' ? 'ok' : cb.state === 'open' ? 'down' : 'degraded'}">
+      <div class="svc-name">${escHtml(name)}</div>
+      <span class="cb-pill cb-${cb.state}">${cb.state.replace('_',' ')}</span>
+      <div class="svc-detail">${cb.failures} failure(s)</div>
+    </div>
+  `).join('') || '<div style="color:var(--muted);grid-column:1/-1">No circuit breaker data</div>';
+}
+
+function renderHistory(cycles) {
+  if (!cycles.length) return;
+
+  const labels  = cycles.map(c => `#${c.cycle}`);
+  const latency = cycles.map(c => c.groq_ms);
+  const colors  = cycles.map(c =>
+    c.status === 'healthy' ? '#3fb950' :
+    c.status === 'degraded' ? '#d29922' : '#f85149'
+  );
+
+  if (_latencyChart) {
+    _latencyChart.data.labels   = labels;
+    _latencyChart.data.datasets[0].data = latency;
+    _latencyChart.data.datasets[0].pointBackgroundColor = colors;
+    _latencyChart.update('none');
+  } else {
+    _latencyChart = new Chart(document.getElementById('chart-latency'), {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [{
+          label: 'Groq ms',
+          data:  latency,
+          borderColor: '#58a6ff',
+          backgroundColor: 'rgba(88,166,255,.08)',
+          fill: true,
+          tension: 0.3,
+          pointBackgroundColor: colors,
+          pointRadius: 4,
+          borderWidth: 2,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { color: '#8b949e', font: { size: 10 } }, grid: { color: '#21262d' } },
+          y: { ticks: { color: '#8b949e', font: { size: 10 }, callback: v => v+'ms' }, grid: { color: '#21262d' } },
+        },
+      },
+    });
+  }
+}
+
+// ── Auto-refresh countdown ──────────────────────────────
+let _remaining = REFRESH_SECS;
+const fillEl   = document.getElementById('refresh-fill');
+
+function tick() {
+  _remaining--;
+  fillEl.style.width = `${(_remaining / REFRESH_SECS) * 100}%`;
+  if (_remaining <= 0) {
+    _remaining = REFRESH_SECS;
+    fetchAll();
+  }
+}
+
+// ── Helpers ──────────────────────────────────────────────
+function setEl(id, val) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = val;
+}
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── Boot ─────────────────────────────────────────────────
+fetchAll();
+setInterval(tick, 1000);
+</script>
+</body>
+</html>

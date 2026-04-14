@@ -27,8 +27,6 @@
       --orange:    #e3b341;
       --radius:    6px;
       --font-mono: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
-      --pip-w:     320px;
-      --pip-h:     220px;
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -308,90 +306,181 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
 
-    /* ── Avatar proctor PiP ── */
+    /* ── AI Proctor — Meet-style video tile ── */
     #proctor-pip {
       position: fixed;
       bottom: 24px;
       right: 24px;
-      width: var(--pip-w);
-      background: var(--bg2);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      box-shadow: 0 8px 32px rgba(0,0,0,.6);
+      width: 280px;
+      background: #0f172a;
+      border-radius: 14px;
+      box-shadow: 0 16px 56px rgba(0,0,0,.85), 0 0 0 1px rgba(255,255,255,.07);
       z-index: 1000;
       overflow: hidden;
       user-select: none;
     }
-    #pip-header {
-      background: var(--bg3);
-      border-bottom: 1px solid var(--border);
-      padding: 8px 12px;
+    #pip-drag-bar {
+      padding: 7px 12px;
+      background: rgba(255,255,255,.05);
+      border-bottom: 1px solid rgba(255,255,255,.06);
       display: flex;
       align-items: center;
-      gap: 8px;
+      justify-content: space-between;
       cursor: move;
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--muted);
     }
-    .pip-dot {
-      width: 8px; height: 8px;
-      border-radius: 50%;
-      background: var(--green);
-      animation: pulse-dot 2s ease-in-out infinite;
+    .pip-logo-text {
+      font-size: 11px;
+      font-weight: 700;
+      color: rgba(255,255,255,.45);
+      letter-spacing: .08em;
+      text-transform: uppercase;
     }
-    @keyframes pulse-dot {
-      0%,100% { opacity: 1; }
-      50%      { opacity: 0.4; }
+    .pip-signal {
+      display: flex;
+      align-items: flex-end;
+      gap: 2px;
     }
-    .pip-dot.alert { background: var(--red); animation: none; }
+    .pip-signal-bar {
+      width: 3px;
+      border-radius: 1px;
+      background: #22c55e;
+    }
+    .pip-signal-bar:nth-child(1) { height: 5px; }
+    .pip-signal-bar:nth-child(2) { height: 8px; }
+    .pip-signal-bar:nth-child(3) { height: 11px; }
+    .pip-signal-bar:nth-child(4) { height: 14px; }
+    .pip-signal-bar.dim { background: rgba(255,255,255,.18); }
 
-    #pip-video {
+    #pip-video-area {
+      position: relative;
       width: 100%;
-      height: var(--pip-h);
-      background: #000;
+      height: 190px;
+      background: linear-gradient(155deg, #1e2a45 0%, #162032 50%, #0d1a30 100%);
       display: flex;
       align-items: center;
       justify-content: center;
+      overflow: hidden;
+    }
+    #pip-video-area::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(255,255,255,.015) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,.015) 1px, transparent 1px);
+      background-size: 24px 24px;
+      pointer-events: none;
+    }
+
+    #pip-live-badge {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      background: rgba(220,38,38,.85);
+      backdrop-filter: blur(4px);
+      color: #fff;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .1em;
+      padding: 3px 8px 3px 6px;
+      border-radius: 4px;
+      z-index: 2;
+    }
+    .live-dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: #fff;
+      animation: pulse-live 1.4s ease-in-out infinite;
+    }
+    @keyframes pulse-live {
+      0%,100% { opacity: 1; transform: scale(1); }
+      50%      { opacity: .35; transform: scale(.65); }
+    }
+
+    #pip-avatar-wrap {
       position: relative;
-    }
-    #pip-video video, #pip-video iframe {
-      width: 100%; height: 100%;
-      object-fit: cover;
-    }
-    #pip-placeholder {
       display: flex;
-      flex-direction: column;
       align-items: center;
-      gap: 8px;
-      color: var(--muted);
+      justify-content: center;
+      z-index: 2;
+    }
+    .pip-ring {
+      position: absolute;
+      border-radius: 50%;
+      border: 1.5px solid rgba(96,165,250,.3);
+      animation: ring-expand 2.2s ease-out infinite;
+      opacity: 0;
+    }
+    .pip-ring:nth-child(1) { width: 92px;  height: 92px;  animation-delay: 0s;   }
+    .pip-ring:nth-child(2) { width: 116px; height: 116px; animation-delay: .65s; }
+    .pip-ring:nth-child(3) { width: 140px; height: 140px; animation-delay: 1.3s; }
+    @keyframes ring-expand {
+      0%   { transform: scale(.85); opacity: .65; }
+      100% { transform: scale(1.05); opacity: 0;  }
+    }
+    .pip-ring.silent { animation: none !important; opacity: 0 !important; }
+
+    #pip-avatar {
+      width: 72px; height: 72px;
+      border-radius: 50%;
+      background: linear-gradient(140deg, #3b82f6 0%, #1d4ed8 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 30px;
+      border: 2.5px solid rgba(255,255,255,.18);
+      box-shadow: 0 4px 24px rgba(59,130,246,.35);
+      position: relative;
+      z-index: 1;
+      transition: border-color .3s, box-shadow .3s;
+    }
+    #pip-avatar.alert-ring {
+      border-color: #ef4444;
+      box-shadow: 0 4px 24px rgba(239,68,68,.5);
+    }
+
+    #pip-speech {
+      position: absolute;
+      bottom: 0; left: 0; right: 0;
+      background: rgba(2,8,20,.82);
+      backdrop-filter: blur(8px);
+      padding: 8px 12px;
       font-size: 12px;
+      line-height: 1.45;
+      color: rgba(255,255,255,.88);
+      border-top: 1px solid rgba(255,255,255,.07);
+      display: none;
+      z-index: 3;
     }
-    #pip-placeholder .avatar-icon {
-      font-size: 48px;
-    }
-    #pip-footer {
+    #pip-speech.show { display: block; }
+
+    #pip-nameplate {
       padding: 10px 12px;
+      background: rgba(0,0,0,.25);
+      border-top: 1px solid rgba(255,255,255,.06);
       display: flex;
       align-items: center;
-      gap: 8px;
+      justify-content: space-between;
     }
-    #proctor-status {
-      flex: 1;
-      font-size: 12px;
-      color: var(--muted);
-    }
-    .strike-badge {
-      display: flex;
-      gap: 4px;
-    }
-    .strike-dot {
+    #pip-name { font-size: 12px; font-weight: 600; color: rgba(255,255,255,.82); }
+    #pip-role { font-size: 10px; color: rgba(255,255,255,.38); margin-top: 1px; }
+    .pip-warn-wrap { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+    .pip-warn-label { font-size: 9px; color: rgba(255,255,255,.3); text-transform: uppercase; letter-spacing: .05em; }
+    .pip-warn-dots { display: flex; gap: 4px; }
+    .pip-warn-dot {
       width: 8px; height: 8px;
       border-radius: 50%;
-      background: var(--border);
-      transition: background 0.3s;
+      border: 1.5px solid rgba(255,255,255,.18);
+      transition: all .3s;
     }
-    .strike-dot.active { background: var(--red); }
+    .pip-warn-dot.lit {
+      background: #ef4444;
+      border-color: #ef4444;
+      box-shadow: 0 0 7px rgba(239,68,68,.65);
+    }
 
     /* ── Warning overlay ── */
     #warning-overlay {
@@ -551,24 +640,43 @@
   </div><!-- /main-split -->
 </div><!-- /workspace -->
 
-<!-- ── Avatar Proctor PiP ── -->
+<!-- ── AI Proctor — Meet-style video tile ── -->
 <div id="proctor-pip">
-  <div id="pip-header">
-    <div class="pip-dot" id="pip-dot"></div>
-    AI Proctor — HireIQ
-  </div>
-  <div id="pip-video">
-    <div id="pip-placeholder">
-      <div class="avatar-icon">🤖</div>
-      <div>Avatar connecting…</div>
+  <div id="pip-drag-bar">
+    <span class="pip-logo-text">HireIQ Proctor</span>
+    <div class="pip-signal">
+      <div class="pip-signal-bar"></div>
+      <div class="pip-signal-bar"></div>
+      <div class="pip-signal-bar"></div>
+      <div class="pip-signal-bar dim"></div>
     </div>
   </div>
-  <div id="pip-footer">
-    <div id="proctor-status">Monitoring session</div>
-    <div class="strike-badge">
-      <div class="strike-dot" id="s1"></div>
-      <div class="strike-dot" id="s2"></div>
-      <div class="strike-dot" id="s3"></div>
+
+  <div id="pip-video-area">
+    <div id="pip-live-badge"><div class="live-dot"></div>LIVE</div>
+
+    <div id="pip-avatar-wrap">
+      <div class="pip-ring silent" id="pr1"></div>
+      <div class="pip-ring silent" id="pr2"></div>
+      <div class="pip-ring silent" id="pr3"></div>
+      <div id="pip-avatar">👩‍💼</div>
+    </div>
+
+    <div id="pip-speech"></div>
+  </div>
+
+  <div id="pip-nameplate">
+    <div>
+      <div id="pip-name">Alex Chen</div>
+      <div id="pip-role">AI Interview Proctor</div>
+    </div>
+    <div class="pip-warn-wrap">
+      <div class="pip-warn-label">Warnings</div>
+      <div class="pip-warn-dots">
+        <div class="pip-warn-dot" id="s1"></div>
+        <div class="pip-warn-dot" id="s2"></div>
+        <div class="pip-warn-dot" id="s3"></div>
+      </div>
     </div>
   </div>
 </div>
@@ -598,18 +706,19 @@
 // ═══════════════════════════════════════════════════════
 
 const STATE = {
-  sessionId:    null,
-  recruiterId:  null,
-  applicantId:  null,
-  problemId:    null,
-  problemType:  'dsa',   // 'dsa' | 'sql'
-  language:     'python3',
-  strikeCount:  0,
-  kicked:       false,
-  timerSec:     90 * 60,
-  timerInterval: null,
-  submissions:  [],
-  wsProctor:    null,
+  sessionId:      null,
+  recruiterId:    null,
+  applicantId:    null,
+  problemId:      null,
+  problemType:    'dsa',   // 'dsa' | 'sql'
+  language:       'python3',
+  strikeCount:    0,
+  kicked:         false,
+  timerSec:       90 * 60,
+  timerInterval:  null,
+  submissions:    [],
+  wsProctor:      null,
+  firstKeystroke: false,   // proactive encouragement fired once
 };
 
 // ── Starter code templates ─────────────────────────────
@@ -657,6 +766,14 @@ require(['vs/editor/editor.main'], function () {
     automaticLayout: true,
     tabSize: 4,
     padding: { top: 10 },
+  });
+
+  // First keystroke → proactive encouragement (fires once)
+  editor.onDidChangeModelContent(() => {
+    if (!STATE.firstKeystroke && editor.getValue().trim().length > 0) {
+      STATE.firstKeystroke = true;
+      setTimeout(() => avatarSpeech(PROCTOR_LINES.firstKey, 7000), 600);
+    }
   });
 
   // Detect copy-paste (proctor hook)
@@ -747,6 +864,21 @@ async function initSession() {
   // Init proctor WebSocket
   initProctorWS();
 
+  // Select weekly persona and apply to PiP before the welcome message fires
+  const _applicantKey = STATE.applicantId || STATE.sessionId || 'guest';
+  selectPersona(_applicantKey).then(persona => {
+    applyPersonaToPip(persona);
+    // Load matching TTS voice (voices may not be ready yet — handle both paths)
+    if (speechSynthesis.getVoices().length) {
+      _loadVoice(persona);
+    } else {
+      speechSynthesis.addEventListener('voiceschanged', () => _loadVoice(persona), { once: true });
+    }
+  });
+
+  // Welcome message from avatar (fires regardless of WS status)
+  setTimeout(() => avatarSpeech(PROCTOR_LINES.welcome, 8000), 1400);
+
   // Tab visibility / window blur detection
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) reportCheatEvent('tab_switch', 'Browser tab switched');
@@ -756,10 +888,13 @@ async function initSession() {
   });
 }
 
+// ── API prefix (portal sub-app is mounted at /portal in main.py) ──────────────
+const API_PREFIX = '/portal';
+
 // ── Problem loading ────────────────────────────────────
 async function loadProblem(problemId) {
   try {
-    const resp = await fetch(`/dsa/problems/${problemId}`);
+    const resp = await fetch(`${API_PREFIX}/dsa/problems/${problemId}`);
     if (!resp.ok) throw new Error('Problem not found');
     const { data: prob } = await resp.json();
     renderProblem(prob);
@@ -835,7 +970,7 @@ function renderProblem(prob) {
 // ── Subscription display ───────────────────────────────
 async function loadSubscription() {
   try {
-    const resp = await fetch(`/subscription/${STATE.recruiterId}`);
+    const resp = await fetch(`${API_PREFIX}/subscription/${STATE.recruiterId}`);
     if (!resp.ok) return;
     const { data } = await resp.json();
     document.getElementById('tier-display').textContent = data.display_name || 'Free';
@@ -858,6 +993,12 @@ function startTimer() {
     if (STATE.timerSec <= 300) {
       document.getElementById('timer').classList.add('urgent');
     }
+    // Proactive time-check messages from the avatar
+    const elapsed = 90 * 60 - STATE.timerSec;
+    if      (elapsed === 15 * 60) avatarSpeech(PROCTOR_LINES.time15, 6000);
+    else if (elapsed === 30 * 60) avatarSpeech(PROCTOR_LINES.time30, 6000);
+    else if (elapsed === 45 * 60) avatarSpeech(PROCTOR_LINES.time45, 6000);
+    else if (elapsed === 60 * 60) avatarSpeech(PROCTOR_LINES.time60, 6000);
   }, 1000);
 }
 
@@ -882,7 +1023,7 @@ async function runCode() {
   const lang = STATE.language;
 
   try {
-    const resp = await fetch('/dsa/run', {
+    const resp = await fetch(`${API_PREFIX}/dsa/run`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -915,7 +1056,7 @@ async function submitCode(forced = false) {
   const lang = STATE.language;
 
   try {
-    const resp = await fetch(`/dsa/sessions/${STATE.sessionId}/submit`, {
+    const resp = await fetch(`${API_PREFIX}/dsa/sessions/${STATE.sessionId}/submit`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -930,8 +1071,10 @@ async function submitCode(forced = false) {
       STATE.submissions.push(sub);
       renderSubmissionResult(sub);
       updateSubmissionsTab();
+      // Notify silent proctoring pipeline of this submission
       if (sub.status === 'accepted') {
         showToast('All test cases passed! 🎉', 'ok');
+        setTimeout(() => avatarSpeech(PROCTOR_LINES.testPass, 7000), 500);
       }
     } else {
       showOutputError(data.error?.message || 'Submission failed');
@@ -1020,17 +1163,213 @@ function setButtonsLoading(loading) {
   document.getElementById('btn-submit').disabled = loading;
 }
 
+// ── Persona pool (must match avatar_persona.py ALL_PERSONAS order) ──────────
+//
+// gender: 'f' | 'm'  — used to filter Web Speech API voices
+// gradient: CSS linear-gradient value for the avatar circle
+// emoji: displayed inside the avatar circle
+// ring: accent colour for the pulse rings (rgba)
+//
+const PERSONAS = [
+  {
+    name:       'Sarah Mitchell',
+    title:      'Senior Talent Acquisition Lead',
+    gender:     'f',
+    emoji:      '👩‍💼',
+    gradient:   'linear-gradient(140deg,#3b82f6 0%,#1d4ed8 100%)',
+    ring:       'rgba(59,130,246,.35)',
+    rate:       0.95,
+    pitch:      1.05,
+  },
+  {
+    name:       'Marcus Johnson',
+    title:      'Engineering Hiring Manager',
+    gender:     'm',
+    emoji:      '👨‍💼',
+    gradient:   'linear-gradient(140deg,#7c3aed 0%,#4c1d95 100%)',
+    ring:       'rgba(124,58,237,.35)',
+    rate:       1.0,
+    pitch:      0.90,
+  },
+  {
+    name:       'Priya Sharma',
+    title:      'Technical Recruiter',
+    gender:     'f',
+    emoji:      '👩‍💻',
+    gradient:   'linear-gradient(140deg,#0891b2 0%,#164e63 100%)',
+    ring:       'rgba(8,145,178,.35)',
+    rate:       1.05,
+    pitch:      1.10,
+  },
+  {
+    name:       "David O'Brien",
+    title:      'Director of Talent Acquisition',
+    gender:     'm',
+    emoji:      '👨‍🏫',
+    gradient:   'linear-gradient(140deg,#374151 0%,#111827 100%)',
+    ring:       'rgba(107,114,128,.35)',
+    rate:       0.90,
+    pitch:      0.82,
+  },
+  {
+    name:       'Zoe Kim',
+    title:      'People & Culture Lead',
+    gender:     'f',
+    emoji:      '👩‍🎓',
+    gradient:   'linear-gradient(140deg,#db2777 0%,#9d174d 100%)',
+    ring:       'rgba(219,39,119,.35)',
+    rate:       0.97,
+    pitch:      1.02,
+  },
+];
+
+// ── Weekly persona rotation ──────────────────────────────────────────────────
+// Mirrors the Python select_persona() logic so the same candidate always
+// sees the same face within a given ISO week, but a different one next week.
+//
+function _isoWeek(date) {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  return [d.getUTCFullYear(), Math.ceil(((d - yearStart) / 86400000 + 1) / 7)];
+}
+
+async function _hashInt(str) {
+  // SHA-256 → first 4 bytes as uint32
+  const buf  = new TextEncoder().encode(str);
+  const hash = await crypto.subtle.digest('SHA-256', buf);
+  return new DataView(hash).getUint32(0, false);     // big-endian
+}
+
+async function selectPersona(applicantId) {
+  const now = new Date();
+  const [isoYear, isoWeek] = _isoWeek(now);
+  const key = `${applicantId}:${isoYear}:${isoWeek}`;
+  const n   = await _hashInt(key);
+  return PERSONAS[n % PERSONAS.length];
+}
+
+// ── Apply persona to PiP DOM ─────────────────────────────────────────────────
+let ACTIVE_PERSONA = PERSONAS[0];   // default until async select resolves
+
+function applyPersonaToPip(p) {
+  ACTIVE_PERSONA = p;
+
+  const avatarEl = document.getElementById('pip-avatar');
+  avatarEl.textContent      = p.emoji;
+  avatarEl.style.background = p.gradient;
+
+  // Update pulse-ring accent colour
+  document.querySelectorAll('.pip-ring').forEach(el => {
+    el.style.borderColor = p.ring;
+  });
+
+  document.getElementById('pip-name').textContent = p.name;
+  document.getElementById('pip-role').textContent = p.title;
+}
+
+// ── Web Speech API voice selection ──────────────────────────────────────────
+let _ttsVoice = null;    // resolved once voices load
+
+function _loadVoice(persona) {
+  const voices = speechSynthesis.getVoices();
+  if (!voices.length) return;                       // not ready yet
+
+  const wantFemale = persona.gender === 'f';
+  const femaleKeys = ['female','woman','girl','zira','hazel','susan','karen',
+                      'moira','tessa','fiona','samantha','victoria'];
+  const maleKeys   = ['male','man','guy','david','mark','daniel','alex',
+                      'george','rishi','lee','tom'];
+  const targetKeys = wantFemale ? femaleKeys : maleKeys;
+
+  // Prefer en-US / en-GB voices that match gender keyword
+  const enVoices = voices.filter(v => /^en/i.test(v.lang));
+  let pick = enVoices.find(v =>
+    targetKeys.some(k => v.name.toLowerCase().includes(k))
+  );
+
+  // Fallback: first English voice in any gender
+  if (!pick) pick = enVoices[0] || voices[0];
+  _ttsVoice = pick;
+}
+
+function _speak(text, persona) {
+  if (!('speechSynthesis' in window)) return;
+  speechSynthesis.cancel();
+
+  const utt    = new SpeechSynthesisUtterance(text);
+  utt.rate     = persona.rate  ?? 1.0;
+  utt.pitch    = persona.pitch ?? 1.0;
+  utt.volume   = 1.0;
+
+  if (_ttsVoice) {
+    utt.voice = _ttsVoice;
+  } else {
+    // Re-attempt voice selection inline
+    _loadVoice(persona);
+    if (_ttsVoice) utt.voice = _ttsVoice;
+  }
+
+  speechSynthesis.speak(utt);
+}
+
+// ── Avatar speech system ───────────────────────────────
+let _speechTimer = null;
+
+// Lines are templates — {{name}} is replaced with the active persona's first name.
+const PROCTOR_LINES = {
+  welcome:  "Hi! I'm {{name}}, your interviewer today. Good luck — stay focused and show us your best work.",
+  firstKey: "Great start! Take your time, think through the problem, and test edge cases.",
+  warn1:    "I noticed some unusual activity. Keep your work original — please stay focused.",
+  warn2:    "Second warning. Please avoid any further integrity violations.",
+  warn3:    "Final warning. One more violation will immediately end your session.",
+  testPass: "Excellent! Your solution passed the tests. Review edge cases before final submission.",
+  time15:   "15 minutes in — you're doing well. Stay calm and methodical.",
+  time30:   "30 minutes in. If you're stuck, try a simpler approach first.",
+  time45:   "45 minutes in. Think about time and space complexity now.",
+  time60:   "One hour completed. Review your code carefully before submitting.",
+};
+
+function _expandLine(text) {
+  const firstName = ACTIVE_PERSONA.name.split(' ')[0];
+  return text.replace(/\{\{name\}\}/g, firstName);
+}
+
+function avatarSpeech(text, durationMs = 6000) {
+  ['pr1','pr2','pr3'].forEach(id => {
+    document.getElementById(id).classList.remove('silent');
+  });
+  const expanded = _expandLine(text);
+  const bubble   = document.getElementById('pip-speech');
+  bubble.textContent = expanded;
+  bubble.classList.add('show');
+
+  _speak(expanded, ACTIVE_PERSONA);
+
+  clearTimeout(_speechTimer);
+  _speechTimer = setTimeout(() => avatarSilent(), durationMs);
+}
+
+function avatarSilent() {
+  ['pr1','pr2','pr3'].forEach(id => {
+    document.getElementById(id).classList.add('silent');
+  });
+  document.getElementById('pip-speech').classList.remove('show');
+  if ('speechSynthesis' in window) speechSynthesis.cancel();
+}
+
 // ── Proctor WebSocket ──────────────────────────────────
 function initProctorWS() {
-  const wsUrl = `ws://${location.host}/dsa/proctor-ws/${STATE.sessionId}`;
+  const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const wsUrl = `${wsProto}://${location.host}${API_PREFIX}/dsa/proctor-ws/${STATE.sessionId}`;
   try {
     STATE.wsProctor = new WebSocket(wsUrl);
-    STATE.wsProctor.onopen  = () => updatePipStatus('Monitoring active', false);
+    STATE.wsProctor.onopen    = () => { document.getElementById('pip-role').textContent = ACTIVE_PERSONA.title; };
     STATE.wsProctor.onmessage = (e) => handleProctorMessage(JSON.parse(e.data));
-    STATE.wsProctor.onclose = () => updatePipStatus('Reconnecting…', false);
-    STATE.wsProctor.onerror = () => updatePipStatus('Connection error', true);
+    STATE.wsProctor.onclose   = () => { document.getElementById('pip-role').textContent = 'Reconnecting…'; };
+    STATE.wsProctor.onerror   = () => { document.getElementById('pip-role').textContent = 'Connection error'; };
   } catch {
-    updatePipStatus('Monitoring offline', true);
+    document.getElementById('pip-role').textContent = 'Monitoring offline';
   }
 }
 
@@ -1039,11 +1378,10 @@ function handleProctorMessage(msg) {
     showCheatWarning(msg.text, msg.strike);
   } else if (msg.type === 'kicked') {
     showKicked(msg.text);
-  } else if (msg.type === 'avatar_url' && msg.url) {
-    // Embed avatar stream in PiP
-    const pipVideo = document.getElementById('pip-video');
-    pipVideo.innerHTML = `<iframe src="${escHtml(msg.url)}" allow="camera; microphone" frameborder="0"></iframe>`;
+  } else if (msg.type === 'avatar_speech' && msg.text) {
+    avatarSpeech(msg.text, msg.duration_ms || 6000);
   }
+  // avatar_url not used — we render the professional CSS avatar tile
 }
 
 function reportCheatEvent(eventType, detail) {
@@ -1057,7 +1395,7 @@ function reportCheatEvent(eventType, detail) {
     }));
   } else {
     // HTTP fallback
-    fetch(`/dsa/sessions/${STATE.sessionId}/cheat-event`, {
+    fetch(`${API_PREFIX}/dsa/sessions/${STATE.sessionId}/cheat-event`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ event_type: eventType, detail }),
@@ -1074,22 +1412,28 @@ function reportCheatEvent(eventType, detail) {
 function showCheatWarning(text, strikeLevel) {
   STATE.strikeCount++;
 
-  // Update strike dots
+  // Light up warning dots
   ['s1','s2','s3'].forEach((id, i) => {
-    document.getElementById(id).classList.toggle('active', i < STATE.strikeCount);
+    document.getElementById(id).classList.toggle('lit', i < STATE.strikeCount);
   });
 
-  // Flash border
+  // Pulse avatar alert ring
+  const avatarEl = document.getElementById('pip-avatar');
+  avatarEl.classList.add('alert-ring');
+  setTimeout(() => avatarEl.classList.remove('alert-ring'), 3000);
+
+  // Flash screen border overlay
   const overlay = document.getElementById('warning-overlay');
   overlay.style.display = 'block';
-  document.getElementById('pip-dot').classList.add('alert');
-  setTimeout(() => {
-    overlay.style.display = 'none';
-    document.getElementById('pip-dot').classList.remove('alert');
-  }, 2000);
+  setTimeout(() => { overlay.style.display = 'none'; }, 2000);
+
+  // Avatar delivers the warning verbally
+  const line = STATE.strikeCount === 1 ? PROCTOR_LINES.warn1
+             : STATE.strikeCount === 2 ? PROCTOR_LINES.warn2
+             : PROCTOR_LINES.warn3;
+  avatarSpeech(line, 7000);
 
   showToast(`⚠️ Strike ${STATE.strikeCount}: ${text}`, 'warn', 6000);
-  updatePipStatus(`⚠️ Strike ${STATE.strikeCount}/3`, true);
 }
 
 function showKicked(message) {
@@ -1099,21 +1443,21 @@ function showKicked(message) {
   if (message) {
     document.getElementById('kicked-message').textContent = message;
   }
-  ['s1','s2','s3'].forEach(id => document.getElementById(id).classList.add('active'));
+  ['s1','s2','s3'].forEach(id => document.getElementById(id).classList.add('lit'));
 }
 
-function updatePipStatus(msg, alert) {
-  document.getElementById('proctor-status').textContent = msg;
-  if (alert) document.getElementById('pip-dot').classList.add('alert');
+function updatePipStatus(msg, isAlert) {
+  document.getElementById('pip-role').textContent = msg;
+  if (isAlert) document.getElementById('pip-avatar').classList.add('alert-ring');
 }
 
 // ── PiP drag ──────────────────────────────────────────
 (function () {
-  const pip = document.getElementById('proctor-pip');
-  const header = document.getElementById('pip-header');
+  const pip    = document.getElementById('proctor-pip');
+  const handle = document.getElementById('pip-drag-bar');
   let dragging = false, ox = 0, oy = 0;
 
-  header.addEventListener('mousedown', e => {
+  handle.addEventListener('mousedown', e => {
     dragging = true;
     ox = e.clientX - pip.offsetLeft;
     oy = e.clientY - pip.offsetTop;

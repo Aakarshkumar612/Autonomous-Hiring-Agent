@@ -32,7 +32,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Optional
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile, status
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
@@ -54,6 +54,8 @@ from utils.logger import logger
 # to avoid reading GROQ_API_KEY before load_dotenv() runs.
 from pipelines.interview_flow import InterviewPipeline
 
+from pipelines.proctoring_pipeline import get_proctoring_pipeline
+
 # DSA platform imports (lazy to avoid circular deps at import time)
 from models.dsa_problem import (
     CheatEventType,
@@ -65,6 +67,14 @@ from models.dsa_problem import (
     TestCase,
 )
 from models.subscription import Feature, TierType, TIER_CONFIGS
+from models.interview_config import (
+    RecruiterInterviewConfig,
+    CreateInterviewConfigRequest,
+    DSAQuestionConfig,
+    SQLQuestionConfig,
+    RoundConfig,
+    UploadQuestionsResponse,
+)
 
 
 # ─────────────────────────────────────────────────────
@@ -669,12 +679,20 @@ async def get_stats():
     tags=["Interviews"],
     summary="Start an interview session for a shortlisted applicant",
 )
-async def start_interview(applicant_id: str):
+async def start_interview(
+    applicant_id: str,
+    config_id: Optional[str] = None,   # query param: ?config_id=<uuid>
+):
     """
     Begin a 3-round autonomous interview session.
 
     The applicant must already exist in the portal (submitted via /apply
     or /apply/bulk). Returns the session ID and the first interview question.
+
+    Optional query param `config_id`: if a RecruiterInterviewConfig with this
+    ID exists, the interviewer agent will ask the recruiter's custom questions
+    (extracted from uploaded files + manually entered) verbatim before falling
+    back to Groq-generated questions.
 
     The caller should present the question to the applicant and then post
     their answer to POST /interview/{session_id}/respond.
@@ -686,26 +704,59 @@ async def start_interview(applicant_id: str):
             detail=f"Applicant not found: {applicant_id}",
         )
 
+    # ── Resolve recruiter config (optional) ──────────────────────────
+    custom_questions: list[str] = []
+    config_name = None
+    if config_id:
+        cfg = _config_by_id.get(config_id)
+        if cfg is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Interview config not found: {config_id}",
+            )
+        config_name = cfg.name
+        # Merge: extracted questions from file uploads come first,
+        # then any manually entered custom questions per round
+        # (behavioral, hr, managerial, technical), deduped.
+        seen: set[str] = set()
+        for q in cfg.extracted_questions:
+            if q not in seen:
+                custom_questions.append(q)
+                seen.add(q)
+        for round_cfg in [cfg.behavioral, cfg.hr, cfg.managerial, cfg.technical]:
+            if round_cfg.enabled:
+                for q in round_cfg.custom_questions:
+                    if q not in seen:
+                        custom_questions.append(q)
+                        seen.add(q)
+
     logger.info(
         f"PORTAL | /interview/{applicant_id}/start | "
-        f"{applicant.full_name} | Role: {applicant.role_applied.value}"
+        f"{applicant.full_name} | Role: {applicant.role_applied.value} | "
+        f"config={config_name or 'none'} | custom_questions={len(custom_questions)}"
     )
 
     try:
         pipeline = _get_pipeline()
-        session_id, first_question = await pipeline.start_interview(applicant)
+        session_id, first_question = await pipeline.start_interview(
+            applicant,
+            custom_questions=custom_questions or None,
+        )
         _session_store[session_id] = applicant_id
 
         logger.info(f"PORTAL | Session created | {session_id} → {applicant_id}")
 
         return {
-            "session_id":     session_id,
-            "applicant_id":   applicant_id,
-            "applicant_name": applicant.full_name,
-            "first_question": first_question,
-            "round":          1,
-            "round_type":     "screening",
-            "total_rounds":   3,
+            "session_id":       session_id,
+            "applicant_id":     applicant_id,
+            "applicant_name":   applicant.full_name,
+            "first_question":   first_question,
+            "round":            1,
+            "round_type":       "screening",
+            "total_rounds":     3,
+            "config_id":        config_id,
+            "config_name":      config_name,
+            "custom_questions": len(custom_questions),
             "instructions": (
                 "Post your response to "
                 f"POST /interview/{session_id}/respond "
@@ -982,6 +1033,7 @@ _dsa_pipeline   = None
 _feature_gate   = None
 _dsa_sessions:  dict[str, DSASession] = {}      # session_id → DSASession (in-memory)
 _dsa_problems:  dict[str, DSAProblem] = {}      # problem_id → DSAProblem (in-memory seed)
+_proctor_ws_connections: dict[str, WebSocket] = {}  # session_id → live WebSocket
 
 
 def _get_feature_gate():
@@ -1144,6 +1196,15 @@ async def start_dsa_session(
     session.language = lang
     _dsa_sessions[session.id] = session
 
+    # Register with silent proctoring pipeline
+    get_proctoring_pipeline().start_session(
+        session_id=session.id,
+        applicant_id=applicant_id,
+        recruiter_id=recruiter_id,
+        problem_id=prob.id,
+        problem_title=prob.title,
+    )
+
     return {
         "success":    True,
         "data": {
@@ -1256,6 +1317,12 @@ async def submit_code(
     if sub.score_pct > session.best_score_pct:
         session.best_score_pct = sub.score_pct
 
+    # Notify silent proctoring pipeline of this submission
+    get_proctoring_pipeline().record_submission(
+        session_id=session_id,
+        score_pct=sub.score_pct,
+    )
+
     return {
         "success": True,
         "data": {
@@ -1320,6 +1387,24 @@ async def report_cheat_event(
     if kicked:
         session.status = __import__('models.dsa_problem', fromlist=['DSASessionStatus']).DSASessionStatus.KICKED
 
+    # Forward event to silent proctoring pipeline
+    get_proctoring_pipeline().record_events(
+        session_id=session_id,
+        raw_events=[{
+            "event_type": event_type,
+            "timestamp":  datetime.utcnow().isoformat(),
+            "detail":     detail,
+        }],
+    )
+
+    # Push warning over WebSocket if candidate is connected
+    ws = _proctor_ws_connections.get(session_id)
+    if ws and warning_text:
+        try:
+            await ws.send_json({"type": "warning", "text": warning_text, "strike": state.strike_count})
+        except Exception:
+            pass
+
     logger.info(
         f"PORTAL | /dsa/sessions/{session_id}/cheat-event | "
         f"{event_type} | strike={state.strike_count} | kicked={kicked}"
@@ -1376,6 +1461,11 @@ async def end_dsa_session(session_id: str):
         raise HTTPException(status_code=404, detail="Session not found")
 
     await _get_dsa_pipeline().end(session, [])
+
+    # Generate proctoring report in a thread (Groq call is sync/blocking)
+    pp = get_proctoring_pipeline()
+    await asyncio.to_thread(pp.generate_report, session_id)
+
     return {
         "success": True,
         "data": {
@@ -1384,6 +1474,83 @@ async def end_dsa_session(session_id: str):
             "best_score_pct": session.best_score_pct,
         },
     }
+
+
+# ── WS /dsa/proctor-ws/{session_id} ──────────────────
+
+@app.websocket("/dsa/proctor-ws/{session_id}")
+async def proctor_ws(websocket: WebSocket, session_id: str):
+    """
+    Persistent WebSocket between the DSA platform and the proctoring backend.
+    - Server → Client: warning, kicked, avatar_speech messages
+    - Client → Server: cheat_event messages (mirrors the HTTP fallback)
+    """
+    session = _dsa_sessions.get(session_id)
+    if not session:
+        await websocket.close(code=4004)
+        return
+
+    await websocket.accept()
+    _proctor_ws_connections[session_id] = websocket
+    logger.info(f"PORTAL | proctor-ws connected | {session_id}")
+
+    try:
+        while True:
+            data = await websocket.receive_json()
+            if data.get("type") == "cheat_event":
+                evt_str = data.get("event_type", "")
+                detail  = data.get("detail", "")
+                try:
+                    evt = CheatEventType(evt_str)
+                except ValueError:
+                    continue
+
+                prob       = _dsa_problems.get(session.problem_id)
+                prob_title = prob.title if prob else ""
+
+                _, warning_text, kicked = await _get_dsa_pipeline().handle_cheat_event(
+                    session=session,
+                    event_type=evt,
+                    detail=detail,
+                    problem_title=prob_title,
+                )
+
+                get_proctoring_pipeline().record_events(
+                    session_id=session_id,
+                    raw_events=[{
+                        "event_type": evt_str,
+                        "timestamp":  datetime.utcnow().isoformat(),
+                        "detail":     detail,
+                    }],
+                )
+
+                if kicked:
+                    await websocket.send_json({"type": "kicked", "text": warning_text or "Session ended."})
+                    break
+                elif warning_text:
+                    await websocket.send_json({"type": "warning", "text": warning_text})
+
+    except WebSocketDisconnect:
+        pass
+    finally:
+        _proctor_ws_connections.pop(session_id, None)
+        logger.info(f"PORTAL | proctor-ws disconnected | {session_id}")
+
+
+# ── GET /proctor/dashboard/{recruiter_id}/data ────────
+
+@app.get(
+    "/proctor/dashboard/{recruiter_id}/data",
+    tags=["Proctoring"],
+    summary="Aggregated proctoring data for recruiter dashboard",
+)
+async def get_proctor_dashboard_data(recruiter_id: str):
+    """
+    Returns ranked candidate list + per-session risk summaries for the
+    recruiter's proctor dashboard.
+    """
+    summary = get_proctoring_pipeline().get_recruiter_summary(recruiter_id)
+    return {"success": True, "data": summary}
 
 
 # ── GET /subscription/{recruiter_id} ─────────────────
@@ -1468,3 +1635,401 @@ async def set_feature_toggle(
             detail="Feature toggles require MAX or ENTERPRISE plan.",
         )
     return {"success": True, "data": {"feature": feature, "enabled": enabled}}
+
+
+# ─────────────────────────────────────────────────────
+#  Recruiter Interview Configuration
+# ─────────────────────────────────────────────────────
+#
+#  In-memory store: { recruiter_id: { config_id: RecruiterInterviewConfig } }
+#  Persisted to Supabase in a future migration; fast dict for now.
+#
+_interview_configs: dict[str, dict[str, RecruiterInterviewConfig]] = {}
+# Flat index — lets interview endpoints look up a config by ID alone
+_config_by_id: dict[str, RecruiterInterviewConfig] = {}
+
+_MAX_FILE_BYTES = 5 * 1024 * 1024   # 5 MB hard limit
+
+
+def _configs_for(recruiter_id: str) -> dict[str, RecruiterInterviewConfig]:
+    if recruiter_id not in _interview_configs:
+        _interview_configs[recruiter_id] = {}
+    return _interview_configs[recruiter_id]
+
+
+# ── POST /recruiter/{id}/interview-config ─────────────
+
+@app.post(
+    "/recruiter/{recruiter_id}/interview-config",
+    tags=["Recruiter Config"],
+    summary="Create or update an interview configuration",
+)
+async def create_interview_config(
+    recruiter_id: str,
+    body: CreateInterviewConfigRequest,
+):
+    """
+    Create a named interview configuration for this recruiter.
+    Specify DSA difficulty breakdown, SQL count, and round settings.
+    Each call with the same name overwrites the existing config for that name.
+    """
+    configs = _configs_for(recruiter_id)
+
+    # Check for existing config with same name (upsert semantics)
+    existing = next(
+        (c for c in configs.values() if c.name == body.name), None
+    )
+    if existing:
+        config_id = existing.config_id
+    else:
+        config_id = str(uuid.uuid4())
+
+    now = datetime.utcnow()
+    config = RecruiterInterviewConfig(
+        config_id=config_id,
+        recruiter_id=recruiter_id,
+        name=body.name,
+        dsa=body.dsa or DSAQuestionConfig(),
+        sql=body.sql or SQLQuestionConfig(),
+        behavioral=body.behavioral or RoundConfig(),
+        hr=body.hr or RoundConfig(),
+        managerial=body.managerial or RoundConfig(),
+        technical=body.technical or RoundConfig(),
+        extracted_questions=existing.extracted_questions if existing else [],
+        created_at=existing.created_at if existing else now,
+        updated_at=now,
+    )
+    configs[config_id] = config
+    _config_by_id[config_id] = config   # keep flat index in sync
+
+    logger.info(
+        f"RECRUITER-CONFIG | {recruiter_id} | "
+        f"{'updated' if existing else 'created'} | config_id={config_id} | name={body.name}"
+    )
+    return {"success": True, "data": _serialize_config(config)}
+
+
+# ── GET /recruiter/{id}/interview-configs ─────────────
+
+@app.get(
+    "/recruiter/{recruiter_id}/interview-configs",
+    tags=["Recruiter Config"],
+    summary="List all interview configurations for a recruiter",
+)
+async def list_interview_configs(recruiter_id: str):
+    configs = _configs_for(recruiter_id)
+    return {
+        "success": True,
+        "data": [_serialize_config(c) for c in configs.values()],
+    }
+
+
+# ── GET /recruiter/{id}/interview-config/{config_id} ──
+
+@app.get(
+    "/recruiter/{recruiter_id}/interview-config/{config_id}",
+    tags=["Recruiter Config"],
+    summary="Get a single interview configuration",
+)
+async def get_interview_config(recruiter_id: str, config_id: str):
+    configs = _configs_for(recruiter_id)
+    if config_id not in configs:
+        raise HTTPException(status_code=404, detail="Config not found")
+    return {"success": True, "data": _serialize_config(configs[config_id])}
+
+
+# ── DELETE /recruiter/{id}/interview-config/{config_id}
+
+@app.delete(
+    "/recruiter/{recruiter_id}/interview-config/{config_id}",
+    tags=["Recruiter Config"],
+    summary="Delete an interview configuration",
+)
+async def delete_interview_config(recruiter_id: str, config_id: str):
+    configs = _configs_for(recruiter_id)
+    if config_id not in configs:
+        raise HTTPException(status_code=404, detail="Config not found")
+    del configs[config_id]
+    _config_by_id.pop(config_id, None)   # keep flat index in sync
+    logger.info(f"RECRUITER-CONFIG | {recruiter_id} | deleted | config_id={config_id}")
+    return {"success": True, "data": {"deleted": config_id}}
+
+
+# ── POST /recruiter/{id}/interview-config/{config_id}/upload-questions
+
+@app.post(
+    "/recruiter/{recruiter_id}/interview-config/{config_id}/upload-questions",
+    tags=["Recruiter Config"],
+    summary="Upload a file to extract interview questions (PDF/DOCX/image/TXT, max 5 MB)",
+)
+async def upload_interview_questions(
+    recruiter_id: str,
+    config_id:    str,
+    file:         UploadFile = File(...),
+):
+    """
+    Accepts: PDF, DOCX, plain-text, or image (JPEG/PNG/WEBP/GIF).
+    Parses the file, sends text to Groq, extracts a list of interview
+    questions, and appends them to the config's extracted_questions.
+
+    The interviewer agent will read these questions during the session.
+    """
+    configs = _configs_for(recruiter_id)
+    if config_id not in configs:
+        raise HTTPException(status_code=404, detail="Config not found")
+
+    config = configs[config_id]
+
+    # ── 1. Size guard ──────────────────────────────────
+    content = await file.read()
+    if len(content) > _MAX_FILE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large — maximum size is 5 MB (got {len(content) / 1024 / 1024:.1f} MB)",
+        )
+
+    filename  = file.filename or "upload"
+    mime_type = file.content_type or ""
+
+    # ── 2. Detect file type and extract raw text ───────
+    try:
+        raw_text, file_type = await asyncio.to_thread(
+            _extract_text_from_file, content, filename, mime_type
+        )
+    except Exception as exc:
+        logger.warning(f"RECRUITER-CONFIG | file extraction failed: {exc}")
+        raise HTTPException(status_code=422, detail=f"Could not read file: {exc}")
+
+    if not raw_text.strip():
+        raise HTTPException(status_code=422, detail="File appears to be empty or unreadable")
+
+    # ── 3. Extract questions via Groq ──────────────────
+    try:
+        questions = await _extract_questions_with_groq(raw_text)
+    except Exception as exc:
+        logger.warning(f"RECRUITER-CONFIG | Groq question extraction failed: {exc}")
+        raise HTTPException(status_code=502, detail=f"Question extraction failed: {exc}")
+
+    # ── 4. Append to config ────────────────────────────
+    config.extracted_questions.extend(questions)
+    config.updated_at = datetime.utcnow()
+
+    logger.info(
+        f"RECRUITER-CONFIG | {recruiter_id} | upload | config_id={config_id} | "
+        f"file={filename} | type={file_type} | extracted={len(questions)}"
+    )
+
+    return {
+        "success": True,
+        "data": UploadQuestionsResponse(
+            config_id=config_id,
+            filename=filename,
+            file_type=file_type,
+            extracted_count=len(questions),
+            total_questions=len(config.extracted_questions),
+            extracted_questions=questions,
+        ).model_dump(),
+    }
+
+
+# ─────────────────────────────────────────────────────
+#  File parsing helpers (run in thread via asyncio.to_thread)
+# ─────────────────────────────────────────────────────
+
+def _extract_text_from_file(
+    content: bytes, filename: str, mime_type: str
+) -> tuple[str, str]:
+    """
+    Parse file bytes → (raw_text, file_type_label).
+    Runs synchronously — call via asyncio.to_thread.
+    """
+    lower = filename.lower()
+
+    # PDF
+    if mime_type == "application/pdf" or lower.endswith(".pdf"):
+        return _parse_pdf(content), "pdf"
+
+    # DOCX
+    if (
+        mime_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        or lower.endswith(".docx")
+    ):
+        return _parse_docx(content), "docx"
+
+    # Plain text
+    if mime_type.startswith("text/") or lower.endswith(".txt") or lower.endswith(".md"):
+        return content.decode("utf-8", errors="replace"), "txt"
+
+    # Image — return sentinel so async caller uses Groq vision
+    if mime_type.startswith("image/") or any(
+        lower.endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".webp", ".gif")
+    ):
+        # Return raw bytes encoded as base64 with a sentinel prefix
+        import base64
+        b64 = base64.b64encode(content).decode()
+        return f"__IMAGE_B64__{mime_type}|{b64}", "image"
+
+    # Fallback: try UTF-8 decode
+    try:
+        return content.decode("utf-8", errors="replace"), "txt"
+    except Exception:
+        raise ValueError(f"Unsupported file type: {mime_type or lower}")
+
+
+def _parse_pdf(content: bytes) -> str:
+    """Extract text from PDF using PyMuPDF (fitz)."""
+    try:
+        import fitz  # PyMuPDF
+        import io
+        doc = fitz.open(stream=io.BytesIO(content), filetype="pdf")
+        pages = [page.get_text() for page in doc]
+        doc.close()
+        return "\n\n".join(pages)
+    except ImportError:
+        raise RuntimeError("PyMuPDF not installed — run: pip install pymupdf")
+
+
+def _parse_docx(content: bytes) -> str:
+    """Extract text from DOCX using python-docx."""
+    try:
+        import io
+        from docx import Document
+        doc = Document(io.BytesIO(content))
+        return "\n".join(para.text for para in doc.paragraphs if para.text.strip())
+    except ImportError:
+        raise RuntimeError("python-docx not installed — run: pip install python-docx")
+
+
+async def _extract_questions_with_groq(raw_text: str) -> list[str]:
+    """
+    Send extracted text (or base64 image) to Groq, get back a list
+    of interview questions. Returns a de-duplicated list of strings.
+    """
+    from groq import AsyncGroq
+
+    client = AsyncGroq(api_key=os.getenv("GROQ_API_KEY", ""))
+    model  = os.getenv("GROQ_SCORER", "llama-3.3-70b-versatile")
+
+    # Image path — use vision model
+    if raw_text.startswith("__IMAGE_B64__"):
+        _, rest       = raw_text.split("__IMAGE_B64__", 1)
+        mime, b64_data = rest.split("|", 1)
+        vision_model  = os.getenv("GROQ_VISION", "meta-llama/llama-4-scout-17b-16e-instruct")
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{mime};base64,{b64_data}"},
+                    },
+                    {
+                        "type": "text",
+                        "text": (
+                            "This image contains interview questions. "
+                            "Extract every question you see, exactly as written. "
+                            "Return ONLY a JSON array of strings — no explanation, "
+                            "no numbering, no markdown fences.\n"
+                            'Example: ["What is a binary tree?", "Explain ACID."]'
+                        ),
+                    },
+                ],
+            }
+        ]
+        resp = await asyncio.wait_for(
+            client.chat.completions.create(model=vision_model, messages=messages, max_tokens=2048),
+            timeout=20.0,
+        )
+    else:
+        # Text path — truncate to 6000 chars to stay within context
+        truncated = raw_text[:6000]
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are a question extractor. Given text from a document, "
+                    "identify every interview question present. "
+                    "Return ONLY a JSON array of question strings — no explanation, "
+                    "no numbering, no markdown.\n"
+                    'Example: ["Tell me about yourself.", "What is O(n log n)?"]'
+                ),
+            },
+            {"role": "user", "content": truncated},
+        ]
+        resp = await asyncio.wait_for(
+            client.chat.completions.create(model=model, messages=messages, max_tokens=2048),
+            timeout=15.0,
+        )
+
+    # Parse JSON array from response
+    import re as _re
+    answer = resp.choices[0].message.content.strip()
+    # Strip markdown fences if present
+    answer = _re.sub(r"```(?:json)?\s*|\s*```", "", answer).strip()
+
+    try:
+        import ast as _ast
+        questions = _ast.literal_eval(answer) if answer.startswith("[") else []
+    except Exception:
+        # Fallback: split by newlines and filter non-empty
+        questions = [line.strip().lstrip("0123456789.-) ") for line in answer.splitlines() if line.strip()]
+
+    # De-duplicate while preserving order
+    seen: set[str] = set()
+    unique = []
+    for q in questions:
+        if isinstance(q, str) and q.strip() and q not in seen:
+            seen.add(q)
+            unique.append(q.strip())
+
+    return unique
+
+
+# ─────────────────────────────────────────────────────
+#  Serialisation helper
+# ─────────────────────────────────────────────────────
+
+def _serialize_config(c: RecruiterInterviewConfig) -> dict:
+    return {
+        "config_id":   c.config_id,
+        "recruiter_id": c.recruiter_id,
+        "name":        c.name,
+        "dsa": {
+            "total_count": c.dsa.total_count,
+            "difficulties": {
+                "easy":   c.dsa.difficulties.easy,
+                "medium": c.dsa.difficulties.medium,
+                "hard":   c.dsa.difficulties.hard,
+            },
+            "pinned_problem_ids": c.dsa.pinned_problem_ids,
+        },
+        "sql": {
+            "count":      c.sql.count,
+            "difficulty": c.sql.difficulty,
+            "pinned_problem_ids": c.sql.pinned_problem_ids,
+        },
+        "behavioral": {
+            "enabled":         c.behavioral.enabled,
+            "question_count":  c.behavioral.question_count,
+            "custom_questions": c.behavioral.custom_questions,
+        },
+        "hr": {
+            "enabled":         c.hr.enabled,
+            "question_count":  c.hr.question_count,
+            "custom_questions": c.hr.custom_questions,
+        },
+        "managerial": {
+            "enabled":         c.managerial.enabled,
+            "question_count":  c.managerial.question_count,
+            "custom_questions": c.managerial.custom_questions,
+        },
+        "technical": {
+            "enabled":         c.technical.enabled,
+            "question_count":  c.technical.question_count,
+            "custom_questions": c.technical.custom_questions,
+        },
+        "extracted_questions": c.extracted_questions,
+        "total_extracted":     len(c.extracted_questions),
+        "created_at":          c.created_at.isoformat(),
+        "updated_at":          c.updated_at.isoformat(),
+    }

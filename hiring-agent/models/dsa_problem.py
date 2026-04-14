@@ -4,7 +4,7 @@ models/dsa_problem.py
 Data models for the DSA interview platform.
 
 Covers:
-  - ProgrammingLanguage — all Judge0-supported DSA languages + SQL
+  - ProgrammingLanguage — all Piston-supported DSA languages + SQL
   - DSAProblem         — problem definition with test cases
   - CodeSubmission     — candidate submission record
   - SubmissionResult   — execution output per test case
@@ -22,49 +22,29 @@ from pydantic import BaseModel, Field
 
 
 # ─────────────────────────────────────────────────────
-#  Language catalogue (Judge0 language IDs)
+#  Language catalogue (Piston language names)
 # ─────────────────────────────────────────────────────
 
 class ProgrammingLanguage(str, Enum):
-    # DSA languages — maps to Judge0 language IDs
-    PYTHON3     = "python3"        # Judge0 ID 71
-    JAVA        = "java"           # Judge0 ID 62
-    CPP17       = "cpp17"          # Judge0 ID 54
-    JAVASCRIPT  = "javascript"     # Judge0 ID 63
-    TYPESCRIPT  = "typescript"     # Judge0 ID 74
-    GO          = "go"             # Judge0 ID 60
-    RUST        = "rust"           # Judge0 ID 73
-    CSHARP      = "csharp"         # Judge0 ID 51
-    KOTLIN      = "kotlin"         # Judge0 ID 78
-    SWIFT       = "swift"          # Judge0 ID 83
-    RUBY        = "ruby"           # Judge0 ID 72
-    SCALA       = "scala"          # Judge0 ID 81
-    PHP         = "php"            # Judge0 ID 68
-    C           = "c"              # Judge0 ID 50
-    BASH        = "bash"           # Judge0 ID 46
-    # SQL — handled by local SQLite sandbox, not Judge0
+    # DSA languages — executed via Piston API (connectors/code_executor.py)
+    PYTHON3     = "python3"
+    JAVA        = "java"
+    CPP17       = "cpp17"
+    JAVASCRIPT  = "javascript"
+    TYPESCRIPT  = "typescript"
+    GO          = "go"
+    RUST        = "rust"
+    CSHARP      = "csharp"
+    KOTLIN      = "kotlin"
+    SWIFT       = "swift"
+    RUBY        = "ruby"
+    SCALA       = "scala"
+    PHP         = "php"
+    C           = "c"
+    BASH        = "bash"
+    # SQL — handled by local SQLite sandbox, not Piston
     SQL         = "sql"
 
-
-# Judge0 integer IDs for each language (used when calling the API)
-JUDGE0_LANGUAGE_IDS: dict[ProgrammingLanguage, int] = {
-    ProgrammingLanguage.C:          50,
-    ProgrammingLanguage.BASH:       46,
-    ProgrammingLanguage.CSHARP:     51,
-    ProgrammingLanguage.CPP17:      54,
-    ProgrammingLanguage.GO:         60,
-    ProgrammingLanguage.JAVA:       62,
-    ProgrammingLanguage.JAVASCRIPT: 63,
-    ProgrammingLanguage.PHP:        68,
-    ProgrammingLanguage.PYTHON3:    71,
-    ProgrammingLanguage.RUBY:       72,
-    ProgrammingLanguage.RUST:       73,
-    ProgrammingLanguage.TYPESCRIPT: 74,
-    ProgrammingLanguage.KOTLIN:     78,
-    ProgrammingLanguage.SCALA:      81,
-    ProgrammingLanguage.SWIFT:      83,
-    # SQL is local — no Judge0 ID
-}
 
 # Human-readable display names for the frontend dropdown
 LANGUAGE_DISPLAY_NAMES: dict[ProgrammingLanguage, str] = {
@@ -98,7 +78,7 @@ class ProblemDifficulty(str, Enum):
 
 
 class ProblemType(str, Enum):
-    DSA = "dsa"   # code execution via Judge0
+    DSA = "dsa"   # code execution via Piston
     SQL = "sql"   # SQL sandbox via SQLite
 
 

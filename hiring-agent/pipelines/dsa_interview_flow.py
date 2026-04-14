@@ -5,7 +5,7 @@ DSA Interview orchestration pipeline.
 
 Wires together:
   - FeatureGate     → tier/usage enforcement
-  - CodeExecutor    → Judge0 code runner
+  - CodeExecutor    → Piston code runner
   - SQLExecutor     → sandboxed SQL runner
   - ProctorAgent    → 3-strike cheat detection
   - AvatarBridge    → proctor avatar speech

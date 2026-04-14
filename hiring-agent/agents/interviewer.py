@@ -161,6 +161,27 @@ class InterviewerAgent:
         self._followup_pending.pop(session_id, None)
         self._session_meta.pop(session_id, None)
 
+    def _next_custom_question(self, session_id: str) -> str | None:
+        """
+        Pop and return the next recruiter-supplied custom question for this
+        session, or None if all custom questions have been used.
+
+        Custom questions are asked exactly as written — no Groq rephrasing.
+        Once exhausted, the agent falls back to Groq-generated questions.
+        """
+        meta = self._session_meta.get(session_id, {})
+        questions = meta.get("custom_questions", [])
+        idx       = meta.get("custom_q_idx", 0)
+        if idx < len(questions):
+            meta["custom_q_idx"] = idx + 1
+            q = questions[idx]
+            logger.info(
+                f"INTERVIEWER | [{session_id}] Using recruiter custom question "
+                f"{idx + 1}/{len(questions)}: {q[:60]}…"
+            )
+            return q
+        return None
+
     # ─────────────────────────────────────────────────
     #  Groq API calls
     # ─────────────────────────────────────────────────
@@ -318,14 +339,20 @@ class InterviewerAgent:
                 experience_years=meta.get("experience_years", 0.0),
                 skills=meta.get("skills", []),
             )
-        question_text = await with_retry(
-            self._call_groq,
-            session,
-            prompt,
-            max_retries=3,
-            base_delay=2.0,
-            model=self.model,
-        )
+        # Use recruiter's custom question if one is available;
+        # otherwise let Groq generate one freely.
+        custom_q = self._next_custom_question(session.session_id)
+        if custom_q:
+            question_text = custom_q
+        else:
+            question_text = await with_retry(
+                self._call_groq,
+                session,
+                prompt,
+                max_retries=3,
+                base_delay=2.0,
+                model=self.model,
+            )
         session.questions.append(
             InterviewQuestion(
                 question_id=self._new_question_id(session),
@@ -380,14 +407,20 @@ class InterviewerAgent:
                 max_questions=QUESTIONS_PER_ROUND,
                 round_number=session.current_round,
             )
-        question_text = await with_retry(
-            self._call_groq,
-            session,
-            prompt,
-            max_retries=3,
-            base_delay=2.0,
-            model=self.model,
-        )
+        # Use recruiter's custom question if one is available;
+        # otherwise let Groq generate one freely.
+        custom_q = self._next_custom_question(session.session_id)
+        if custom_q:
+            question_text = custom_q
+        else:
+            question_text = await with_retry(
+                self._call_groq,
+                session,
+                prompt,
+                max_retries=3,
+                base_delay=2.0,
+                model=self.model,
+            )
         session.questions.append(
             InterviewQuestion(
                 question_id=self._new_question_id(session),
@@ -453,9 +486,21 @@ class InterviewerAgent:
     #  Public API
     # ─────────────────────────────────────────────────
 
-    async def start_session(self, applicant: Applicant) -> tuple[InterviewSession, str]:
+    async def start_session(
+        self,
+        applicant: Applicant,
+        custom_questions: list[str] | None = None,
+    ) -> tuple[InterviewSession, str]:
         """
         Create an interview session and generate the Round 1 opening question.
+
+        Args:
+            applicant         — full applicant profile
+            custom_questions  — ordered list of recruiter-supplied questions.
+                                When provided, the agent asks these verbatim
+                                (in order) before falling back to Groq generation.
+                                Sourced from RecruiterInterviewConfig.extracted_questions
+                                and per-round custom_questions fields.
 
         Returns:
             (session, first_question_text)
@@ -475,10 +520,19 @@ class InterviewerAgent:
 
         # Cache applicant profile for use when opening rounds 2 and 3,
         # where we no longer have the Applicant object available.
+        # Also store the recruiter's custom question queue for this session.
         self._session_meta[session_id] = {
             "experience_years": applicant.total_experience_years(),
             "skills": applicant.skill_names(),
+            "custom_questions": list(custom_questions or []),
+            "custom_q_idx":     0,
         }
+
+        if custom_questions:
+            logger.info(
+                f"INTERVIEWER | [{session_id}] Loaded {len(custom_questions)} "
+                f"recruiter custom question(s)"
+            )
 
         log_interview_event(session_id, "Session started", applicant.full_name)
 

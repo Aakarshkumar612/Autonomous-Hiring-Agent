@@ -1,14 +1,13 @@
 """
 connectors/code_executor.py
 ═══════════════════════════════════════════════════════
-Judge0 API wrapper for multi-language code execution.
+Piston API wrapper for multi-language code execution.
 
-Supports self-hosted Judge0 (Docker) and the hosted
-judge0.com API. Set JUDGE0_URL and optionally JUDGE0_API_KEY
-in .env.
+Piston is open-source and provides a free public endpoint at
+https://emkc.org/api/v2/piston — no API key required.
 
-Default: uses the Community Edition endpoint at localhost:2358
-when JUDGE0_URL is not set (assumes local Docker).
+Set PISTON_URL in .env to point at a self-hosted instance.
+Default: https://emkc.org/api/v2/piston (public endpoint).
 
 Usage:
     executor = CodeExecutor()
@@ -22,14 +21,12 @@ Usage:
 from __future__ import annotations
 
 import asyncio
-import base64
 import os
 from typing import Optional
 
 import httpx
 
 from models.dsa_problem import (
-    CodeSubmission,
     ProgrammingLanguage,
     SubmissionStatus,
     TestCase,
@@ -37,184 +34,132 @@ from models.dsa_problem import (
 )
 from utils.logger import logger
 
-# ── Judge0 language IDs ───────────────────────────────
-JUDGE0_LANGUAGE_IDS: dict[ProgrammingLanguage, int] = {
-    ProgrammingLanguage.C:          50,
-    ProgrammingLanguage.BASH:       46,
-    ProgrammingLanguage.CSHARP:     51,
-    ProgrammingLanguage.CPP17:      54,
-    ProgrammingLanguage.GO:         60,
-    ProgrammingLanguage.JAVA:       62,
-    ProgrammingLanguage.JAVASCRIPT: 63,
-    ProgrammingLanguage.PHP:        68,
-    ProgrammingLanguage.PYTHON3:    71,
-    ProgrammingLanguage.RUBY:       72,
-    ProgrammingLanguage.RUST:       73,
-    ProgrammingLanguage.TYPESCRIPT: 74,
-    ProgrammingLanguage.KOTLIN:     78,
-    ProgrammingLanguage.SCALA:      81,
-    ProgrammingLanguage.SWIFT:      83,
-}
-
-# Judge0 status IDs → our SubmissionStatus
-_J0_STATUS: dict[int, SubmissionStatus] = {
-    1:  SubmissionStatus.PENDING,
-    2:  SubmissionStatus.RUNNING,
-    3:  SubmissionStatus.ACCEPTED,
-    4:  SubmissionStatus.WRONG_ANSWER,
-    5:  SubmissionStatus.TIME_LIMIT,
-    6:  SubmissionStatus.COMPILE_ERROR,
-    7:  SubmissionStatus.RUNTIME_ERROR,
-    8:  SubmissionStatus.RUNTIME_ERROR,
-    9:  SubmissionStatus.RUNTIME_ERROR,
-    10: SubmissionStatus.RUNTIME_ERROR,
-    11: SubmissionStatus.RUNTIME_ERROR,
-    12: SubmissionStatus.MEMORY_LIMIT,
-    13: SubmissionStatus.INTERNAL_ERROR,
-    14: SubmissionStatus.INTERNAL_ERROR,
+# ── Piston language names ─────────────────────────────
+# Maps our internal ProgrammingLanguage enum → Piston language name + file name
+_PISTON_LANGS: dict[ProgrammingLanguage, tuple[str, str]] = {
+    ProgrammingLanguage.PYTHON3:    ("python",     "main.py"),
+    ProgrammingLanguage.JAVA:       ("java",        "Main.java"),
+    ProgrammingLanguage.CPP17:      ("c++",         "main.cpp"),
+    ProgrammingLanguage.JAVASCRIPT: ("javascript",  "main.js"),
+    ProgrammingLanguage.TYPESCRIPT: ("typescript",  "main.ts"),
+    ProgrammingLanguage.GO:         ("go",           "main.go"),
+    ProgrammingLanguage.RUST:       ("rust",         "main.rs"),
+    ProgrammingLanguage.CSHARP:     ("csharp",       "Main.cs"),
+    ProgrammingLanguage.KOTLIN:     ("kotlin",       "Main.kt"),
+    ProgrammingLanguage.SWIFT:      ("swift",        "main.swift"),
+    ProgrammingLanguage.RUBY:       ("ruby",         "main.rb"),
+    ProgrammingLanguage.SCALA:      ("scala",        "Main.scala"),
+    ProgrammingLanguage.PHP:        ("php",          "main.php"),
+    ProgrammingLanguage.C:          ("c",            "main.c"),
+    ProgrammingLanguage.BASH:       ("bash",         "main.sh"),
 }
 
 
-def _b64(s: str) -> str:
-    return base64.b64encode(s.encode()).decode()
+def _map_status(run: dict, compile_stage: Optional[dict]) -> tuple[SubmissionStatus, str]:
+    """
+    Derive SubmissionStatus from Piston's run/compile output.
 
+    Returns (status, error_message).
+    """
+    # Compile-stage failure (e.g. Java, C++, Rust)
+    if compile_stage and compile_stage.get("code", 0) != 0:
+        err = (compile_stage.get("stderr") or compile_stage.get("output") or "").strip()
+        return SubmissionStatus.COMPILE_ERROR, err
 
-def _from_b64(s: Optional[str]) -> str:
-    if not s:
-        return ""
-    try:
-        return base64.b64decode(s).decode(errors="replace")
-    except Exception:
-        return s
+    exit_code = run.get("code", 0)
+    signal    = run.get("signal")      # "SIGKILL" on TLE/OOM
+    stderr    = (run.get("stderr") or "").strip()
+
+    if signal == "SIGKILL":
+        # Piston sends SIGKILL on run_timeout or memory exceeded
+        return SubmissionStatus.TIME_LIMIT, "Time limit exceeded"
+
+    if exit_code != 0:
+        return SubmissionStatus.RUNTIME_ERROR, stderr or f"Exit code {exit_code}"
+
+    return SubmissionStatus.ACCEPTED, ""
 
 
 class CodeExecutor:
     """
-    Async wrapper around the Judge0 API.
+    Async wrapper around the Piston code execution API.
 
-    All requests are base64-encoded (Judge0 `base64_encoded=true`
-    parameter) to safely handle binary/special characters.
+    Piston is synchronous from the caller's perspective — one POST,
+    one response. No polling required (unlike Judge0).
 
-    Raises nothing — errors are captured in SubmissionStatus.
+    Raises nothing — all errors are captured in SubmissionStatus.
     """
 
     def __init__(self) -> None:
-        self._base_url = os.getenv("JUDGE0_URL", "http://localhost:2358").rstrip("/")
-        self._api_key  = os.getenv("JUDGE0_API_KEY", "")
-        self._timeout  = int(os.getenv("JUDGE0_TIMEOUT_S", "30"))
-
-    def _headers(self) -> dict:
-        h: dict = {"Content-Type": "application/json"}
-        if self._api_key:
-            h["X-Auth-Token"] = self._api_key
-        return h
-
-    async def _submit(
-        self,
-        source_code: str,
-        language:    ProgrammingLanguage,
-        stdin:       str,
-        time_limit_s:  float = 5.0,
-        memory_limit_kb: int = 262144,
-    ) -> str:
-        """
-        Submit a code run to Judge0. Returns the submission token.
-        Raises httpx.HTTPError on network failure.
-        """
-        lang_id = JUDGE0_LANGUAGE_IDS.get(language)
-        if lang_id is None:
-            raise ValueError(f"No Judge0 language ID for {language}")
-
-        payload = {
-            "source_code":    _b64(source_code),
-            "language_id":    lang_id,
-            "stdin":          _b64(stdin),
-            "cpu_time_limit": time_limit_s,
-            "memory_limit":   memory_limit_kb,
-            "base64_encoded": True,
-        }
-
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
-            resp = await client.post(
-                f"{self._base_url}/submissions",
-                json=payload,
-                headers=self._headers(),
-                params={"base64_encoded": "true"},
-            )
-            resp.raise_for_status()
-            return resp.json()["token"]
-
-    async def _poll(self, token: str) -> dict:
-        """
-        Poll Judge0 for results. Waits up to self._timeout seconds.
-        Returns the raw Judge0 result dict.
-        """
-        deadline = asyncio.get_event_loop().time() + self._timeout
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
-            while asyncio.get_event_loop().time() < deadline:
-                resp = await client.get(
-                    f"{self._base_url}/submissions/{token}",
-                    headers=self._headers(),
-                    params={"base64_encoded": "true"},
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                status_id = data.get("status", {}).get("id", 1)
-                if status_id >= 3:   # terminal state
-                    return data
-                await asyncio.sleep(1)
-        raise TimeoutError(f"Judge0 did not finish within {self._timeout}s")
+        base = os.getenv("PISTON_URL", "https://emkc.org/api/v2/piston").rstrip("/")
+        self._execute_url = f"{base}/execute"
+        self._timeout     = int(os.getenv("PISTON_TIMEOUT_S", "30"))
 
     async def execute(
         self,
-        source_code: str,
-        language:    ProgrammingLanguage,
-        stdin:       str = "",
-        time_limit_s:  float = 5.0,
-        memory_limit_kb: int = 262144,
+        source_code:    str,
+        language:       ProgrammingLanguage,
+        stdin:          str = "",
+        time_limit_s:   float = 5.0,
+        memory_limit_kb: int = 262144,   # kept for API compatibility; Piston ignores this
     ) -> tuple[SubmissionStatus, str, Optional[float], Optional[int], str]:
         """
-        Execute code against a single stdin and return:
+        Execute code via Piston and return:
           (status, stdout, runtime_ms, memory_kb, error_msg)
 
-        Never raises — returns INTERNAL_ERROR on unexpected exceptions.
+        memory_kb is always None — Piston does not expose memory usage.
+        Never raises.
         """
+        lang_info = _PISTON_LANGS.get(language)
+        if lang_info is None:
+            return SubmissionStatus.INTERNAL_ERROR, "", None, None, f"Unsupported language: {language}"
+
+        piston_lang, filename = lang_info
+
+        payload = {
+            "language": piston_lang,
+            "version":  "*",          # always use latest available runtime
+            "files":    [{"name": filename, "content": source_code}],
+            "stdin":    stdin,
+            "run_timeout":     int(time_limit_s * 1000),   # ms
+            "compile_timeout": 10_000,                     # 10s compile ceiling
+        }
+
         try:
-            token  = await self._submit(source_code, language, stdin, time_limit_s, memory_limit_kb)
-            result = await self._poll(token)
+            async with httpx.AsyncClient(timeout=self._timeout) as client:
+                import time as _time
+                t0   = _time.monotonic()
+                resp = await client.post(self._execute_url, json=payload)
+                runtime_ms = (_time.monotonic() - t0) * 1000
+                resp.raise_for_status()
 
-            status_id  = result.get("status", {}).get("id", 13)
-            status     = _J0_STATUS.get(status_id, SubmissionStatus.INTERNAL_ERROR)
-            stdout     = _from_b64(result.get("stdout"))
-            stderr     = _from_b64(result.get("stderr"))
-            compile_out = _from_b64(result.get("compile_output"))
-            runtime_ms  = None
-            memory_kb   = None
+            data          = resp.json()
+            run           = data.get("run", {})
+            compile_stage = data.get("compile")   # None for interpreted languages
+            stdout        = (run.get("stdout") or "").strip()
 
-            if result.get("time"):
-                try:
-                    runtime_ms = float(result["time"]) * 1000
-                except ValueError:
-                    pass
-            if result.get("memory"):
-                try:
-                    memory_kb = int(result["memory"])
-                except ValueError:
-                    pass
+            status, error_msg = _map_status(run, compile_stage)
 
-            error_msg = stderr or compile_out or ""
-            return status, stdout, runtime_ms, memory_kb, error_msg
+            # If process exited cleanly but stdout is empty and stderr has content,
+            # surface stderr as the error message
+            if not error_msg and not stdout and run.get("stderr"):
+                error_msg = run["stderr"].strip()
 
+            return status, stdout, round(runtime_ms, 1), None, error_msg
+
+        except httpx.TimeoutException:
+            logger.error(f"CODE_EXECUTOR | Piston request timed out ({self._timeout}s)")
+            return SubmissionStatus.INTERNAL_ERROR, "", None, None, "Execution service timed out"
         except Exception as exc:
             logger.error(f"CODE_EXECUTOR | execute failed: {exc}")
             return SubmissionStatus.INTERNAL_ERROR, "", None, None, str(exc)
 
     async def run_test_cases(
         self,
-        source_code:  str,
-        language:     ProgrammingLanguage,
-        test_cases:   list[TestCase],
-        time_limit_ms: int = 5000,
+        source_code:     str,
+        language:        ProgrammingLanguage,
+        test_cases:      list[TestCase],
+        time_limit_ms:   int = 5000,
         memory_limit_mb: int = 256,
     ) -> tuple[list[TestCaseResult], SubmissionStatus]:
         """
@@ -222,10 +167,10 @@ class CodeExecutor:
         Returns (per-case results, aggregate status).
 
         Aggregate status:
-          ACCEPTED       — all tests passed
-          WRONG_ANSWER   — at least one test failed (no error)
-          COMPILE_ERROR  — first case returned compile error
-          anything else  — first terminal non-ACCEPTED status
+          ACCEPTED      — all tests passed
+          WRONG_ANSWER  — at least one test failed (no error)
+          COMPILE_ERROR — first case returned compile error
+          anything else — first terminal non-ACCEPTED status
         """
         time_limit_s    = time_limit_ms / 1000
         memory_limit_kb = memory_limit_mb * 1024
@@ -248,22 +193,21 @@ class CodeExecutor:
                 error=error if not passed else "",
             )
 
-        # Run all test cases concurrently
         tasks   = [_run_one(i, tc) for i, tc in enumerate(test_cases)]
         results = list(await asyncio.gather(*tasks))
 
-        # Determine aggregate status
         all_passed = all(r.passed for r in results)
         if all_passed:
-            aggregate = SubmissionStatus.ACCEPTED
-        else:
-            # Use status from first failed case
-            first_fail = next((r for r in results if not r.passed), None)
-            if first_fail and "compile" in first_fail.error.lower():
-                aggregate = SubmissionStatus.COMPILE_ERROR
-            elif any(r.error for r in results):
-                aggregate = SubmissionStatus.RUNTIME_ERROR
-            else:
-                aggregate = SubmissionStatus.WRONG_ANSWER
+            return results, SubmissionStatus.ACCEPTED
 
-        return results, aggregate
+        first_fail = next((r for r in results if not r.passed), None)
+        if first_fail:
+            err_lower = (first_fail.error or "").lower()
+            if "compile" in err_lower:
+                return results, SubmissionStatus.COMPILE_ERROR
+            if "time limit" in err_lower:
+                return results, SubmissionStatus.TIME_LIMIT
+            if first_fail.error:
+                return results, SubmissionStatus.RUNTIME_ERROR
+
+        return results, SubmissionStatus.WRONG_ANSWER

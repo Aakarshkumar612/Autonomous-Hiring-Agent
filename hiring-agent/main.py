@@ -45,6 +45,7 @@ from models.applicant import Applicant, ApplicationStatus, ExperienceLevel, Skil
 from pipelines.ingest import IngestPipeline
 from pipelines.interview_flow import InterviewPipeline
 from pipelines.rank import RankPipeline
+from pipelines.harness_pipeline import HarnessPipeline
 from utils.logger import logger
 
 # ─────────────────────────────────────────────────────
@@ -57,6 +58,9 @@ _ingest_pipeline     = IngestPipeline(page_index=_page_index)
 _rank_pipeline       = RankPipeline()
 _interview_pipeline  = InterviewPipeline(session_store=_session_store)
 _learner_agent       = LearnerAgent()
+
+# Harness pipeline — wired after portal_app imports so _dsa_sessions exists
+_harness: Optional[HarnessPipeline] = None
 
 # Max simultaneous interview sessions started by /run-interviews
 MAX_CONCURRENT_INTERVIEWS = 5
@@ -94,6 +98,8 @@ async def _session_purge_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global _harness
+
     logger.info("═══ Autonomous Hiring Agent starting ═══")
     logger.info(f"  GROQ_API_KEY  : {'set' if os.getenv('GROQ_API_KEY') else 'MISSING ⚠'}")
     logger.info(f"  SUPABASE_URL  : {'set' if os.getenv('SUPABASE_URL') else 'not set'}")
@@ -101,19 +107,34 @@ async def lifespan(app: FastAPI):
     logger.info(f"  GROQ_SCORER   : {os.getenv('GROQ_SCORER', 'llama-3.3-70b-versatile (default)')}")
     logger.info("═══════════════════════════════════════")
 
-    # Start the background session-purge task.
-    # asyncio.create_task schedules it on the running event loop.
+    # Start the background session-purge task
     purge_task = asyncio.create_task(_session_purge_loop())
     logger.info(f"SESSION_PURGE | Background purge started (interval: {SESSION_PURGE_INTERVAL}s)")
 
+    # Start the platform harness — wires into live in-memory stores from portal_app
+    from connectors import portal_api as _portal
+    _harness = HarnessPipeline(
+        dsa_sessions=_portal._dsa_sessions,
+        dsa_pipeline=_portal._get_dsa_pipeline(),
+        session_store=_session_store,
+        page_index=_page_index,
+    )
+    harness_task = asyncio.create_task(_harness.run())
+    logger.info(
+        f"HARNESS | Platform harness started "
+        f"(interval={os.getenv('HARNESS_INTERVAL_SECS', '60')}s)"
+    )
+
     yield
 
-    # Cancel the purge task cleanly on shutdown
+    # Clean shutdown
+    harness_task.cancel()
     purge_task.cancel()
-    try:
-        await purge_task
-    except asyncio.CancelledError:
-        pass
+    for task in (harness_task, purge_task):
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
     logger.info("Autonomous Hiring Agent shutting down.")
 
 
@@ -173,6 +194,24 @@ async def dsa_platform():
 
 
 @app.get(
+    "/proctor/dashboard",
+    tags=["DSA Platform"],
+    summary="Serve the recruiter proctoring dashboard HTML",
+    response_class=FileResponse,
+)
+async def proctor_dashboard():
+    """
+    Recruiter-facing dashboard showing ranked candidates, risk scores, and
+    per-session proctoring events.
+    Open with ?recruiter=<recruiter_id> query param.
+    """
+    html_path = os.path.join(_static_dir, "proctor_dashboard.html")
+    if not os.path.exists(html_path):
+        raise HTTPException(status_code=404, detail="Proctor dashboard HTML not found")
+    return FileResponse(html_path, media_type="text/html")
+
+
+@app.get(
     "/health",
     tags=["System"],
     summary="Health check",
@@ -193,6 +232,51 @@ async def health():
         "is_full":          pi_stats["is_full"],
         "page_index_stats": pi_stats,
     }
+
+
+@app.get(
+    "/health/detailed",
+    tags=["System"],
+    summary="Full platform health — all services, metrics, circuit breakers",
+)
+async def health_detailed():
+    """
+    Returns the latest harness cycle snapshot:
+      - Status of every external service (Groq, Supabase, Piston)
+      - Live platform metrics (active sessions, PageIndex usage, Groq latency)
+      - Circuit breaker state per service
+      - Active alerts
+    Updated every HARNESS_INTERVAL_SECS seconds (default: 60s).
+    """
+    if _harness is None:
+        return {"status": "initializing", "message": "Harness not yet started"}
+    return _harness.get_status()
+
+
+@app.get(
+    "/harness/history",
+    tags=["System"],
+    summary="Last N harness cycle summaries (for dashboard chart)",
+)
+async def harness_history():
+    """Returns the last 20 cycle summaries: status, latency, alert count, active sessions."""
+    if _harness is None:
+        return {"cycles": []}
+    return {"cycles": _harness.get_history()}
+
+
+@app.get(
+    "/harness/dashboard",
+    tags=["System"],
+    summary="Platform operations dashboard (HTML)",
+    response_class=FileResponse,
+)
+async def harness_dashboard():
+    """Serves the real-time platform operations HTML dashboard."""
+    html_path = os.path.join(_static_dir, "harness_dashboard.html")
+    if not os.path.exists(html_path):
+        raise HTTPException(status_code=404, detail="Harness dashboard HTML not found")
+    return FileResponse(html_path, media_type="text/html")
 
 
 # ─────────────────────────────────────────────────────

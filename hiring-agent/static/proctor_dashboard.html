@@ -1,0 +1,864 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HireIQ — Proctoring Analytics</title>
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+  <style>
+    :root {
+      --bg:        #0d1117;
+      --bg2:       #161b22;
+      --bg3:       #21262d;
+      --border:    #30363d;
+      --text:      #e6edf3;
+      --muted:     #8b949e;
+      --accent:    #58a6ff;
+      --green:     #3fb950;
+      --yellow:    #d29922;
+      --red:       #f85149;
+      --orange:    #e3b341;
+      --purple:    #bc8cff;
+      --teal:      #39d353;
+      --radius:    8px;
+      --font-mono: 'SF Mono', 'Fira Code', monospace;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      font-size: 14px;
+      min-height: 100vh;
+    }
+
+    /* ── Navbar ── */
+    header {
+      background: var(--bg2);
+      border-bottom: 1px solid var(--border);
+      padding: 0 28px;
+      height: 56px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .logo { font-size: 18px; font-weight: 700; color: var(--accent); letter-spacing: -0.5px; }
+    .logo span { color: var(--text); font-weight: 400; }
+    header .sep { flex: 1; }
+    .header-meta { font-size: 12px; color: var(--muted); }
+    .header-meta strong { color: var(--text); }
+
+    /* ── Main layout ── */
+    main { max-width: 1320px; margin: 0 auto; padding: 28px 24px 64px; }
+
+    h1 { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
+    .sub { color: var(--muted); font-size: 13px; margin-bottom: 28px; }
+
+    /* ── Summary cards ── */
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+      margin-bottom: 32px;
+    }
+    @media (max-width: 900px) { .cards { grid-template-columns: repeat(2, 1fr); } }
+
+    .card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+    }
+    .card-label { font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); margin-bottom: 8px; }
+    .card-value { font-size: 32px; font-weight: 700; line-height: 1; }
+    .card-sub   { font-size: 12px; color: var(--muted); margin-top: 4px; }
+    .card.green .card-value { color: var(--green); }
+    .card.yellow .card-value { color: var(--yellow); }
+    .card.red .card-value { color: var(--red); }
+    .card.blue .card-value { color: var(--accent); }
+
+    /* ── Section headers ── */
+    .section { margin-bottom: 32px; }
+    .section-title {
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 16px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .section-title .dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--accent);
+      display: inline-block;
+    }
+
+    /* ── Charts row ── */
+    .charts-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 32px;
+    }
+    @media (max-width: 1100px) { .charts-row { grid-template-columns: 1fr 1fr; } }
+    @media (max-width: 700px)  { .charts-row { grid-template-columns: 1fr; } }
+
+    .chart-card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+    }
+    .chart-title { font-size: 13px; font-weight: 600; color: var(--muted); margin-bottom: 14px; text-transform: uppercase; letter-spacing: .4px; }
+    .chart-wrap  { position: relative; height: 200px; }
+
+    /* ── Candidate table ── */
+    .table-wrap {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    table { width: 100%; border-collapse: collapse; }
+    thead tr { background: var(--bg3); }
+    th {
+      padding: 12px 14px;
+      text-align: left;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .6px;
+      color: var(--muted);
+      font-weight: 600;
+      white-space: nowrap;
+      cursor: pointer;
+      user-select: none;
+    }
+    th:hover { color: var(--text); }
+    th .sort-icon { margin-left: 4px; opacity: .4; }
+    th.sorted .sort-icon { opacity: 1; color: var(--accent); }
+
+    tbody tr {
+      border-top: 1px solid var(--border);
+      cursor: pointer;
+      transition: background .12s;
+    }
+    tbody tr:hover { background: var(--bg3); }
+    td { padding: 12px 14px; font-size: 13px; }
+
+    .rank-badge {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 28px; height: 28px;
+      border-radius: 50%;
+      font-weight: 700;
+      font-size: 12px;
+      background: var(--bg3);
+      border: 1px solid var(--border);
+    }
+    .rank-badge.gold   { background: #3d2e00; border-color: #d29922; color: #d29922; }
+    .rank-badge.silver { background: #1f2732; border-color: #8b949e; color: #8b949e; }
+    .rank-badge.bronze { background: #2a1900; border-color: #b45309; color: #b45309; }
+
+    .score-bar-wrap { display: flex; align-items: center; gap: 8px; }
+    .score-bar {
+      flex: 1; height: 6px;
+      background: var(--bg3);
+      border-radius: 3px;
+      overflow: hidden;
+      min-width: 60px;
+    }
+    .score-bar-fill {
+      height: 100%; border-radius: 3px;
+      background: var(--green);
+      transition: width .4s;
+    }
+    .score-val { font-weight: 600; width: 38px; text-align: right; font-family: var(--font-mono); font-size: 12px; }
+
+    .risk-pill {
+      display: inline-block;
+      padding: 2px 10px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .4px;
+    }
+    .risk-low      { background: #0d2718; color: var(--green);  border: 1px solid #1a4a2a; }
+    .risk-medium   { background: #2a1f00; color: var(--yellow); border: 1px solid #4a3800; }
+    .risk-high     { background: #2a0e00; color: var(--orange); border: 1px solid #4a1f00; }
+    .risk-critical { background: #2a0000; color: var(--red);    border: 1px solid #4a0000; }
+    .risk-pending  { background: var(--bg3); color: var(--muted); border: 1px solid var(--border); }
+
+    .flag-count {
+      display: inline-flex; align-items: center; gap: 4px;
+      font-size: 12px; color: var(--muted);
+    }
+    .flag-count.has-flags { color: var(--red); }
+
+    /* ── Event timeline in modal ── */
+    .timeline { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; max-height: 260px; overflow-y: auto; }
+    .timeline-event {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 8px 10px;
+      background: var(--bg3);
+      border-radius: 6px;
+      border-left: 3px solid var(--border);
+      font-size: 12px;
+    }
+    .timeline-event.tab_hidden   { border-color: var(--yellow); }
+    .timeline-event.large_paste  { border-color: var(--red); }
+    .timeline-event.paste_detected { border-color: var(--orange); }
+    .timeline-event.window_blur  { border-color: var(--muted); }
+    .timeline-event.devtools     { border-color: var(--purple); }
+    .timeline-event.rapid_input  { border-color: var(--teal); }
+    .ev-icon { font-size: 14px; flex-shrink: 0; margin-top: 1px; }
+    .ev-body  { flex: 1; }
+    .ev-type  { font-weight: 600; text-transform: capitalize; color: var(--text); }
+    .ev-time  { color: var(--muted); font-family: var(--font-mono); font-size: 11px; margin-top: 2px; }
+    .ev-detail { color: var(--muted); margin-top: 2px; }
+    .ev-away  { color: var(--yellow); font-family: var(--font-mono); font-size: 11px; }
+
+    /* ── Detail modal ── */
+    .modal-overlay {
+      display: none;
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,.7);
+      backdrop-filter: blur(4px);
+      z-index: 200;
+      align-items: center;
+      justify-content: center;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      width: min(900px, 96vw);
+      max-height: 90vh;
+      overflow-y: auto;
+      padding: 28px;
+    }
+    .modal-header {
+      display: flex; align-items: flex-start; justify-content: space-between;
+      margin-bottom: 20px;
+    }
+    .modal-title { font-size: 18px; font-weight: 700; }
+    .modal-close {
+      background: none; border: none; color: var(--muted);
+      font-size: 20px; cursor: pointer; line-height: 1; padding: 4px;
+    }
+    .modal-close:hover { color: var(--text); }
+
+    .modal-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+    @media (max-width: 600px) { .modal-grid { grid-template-columns: 1fr; } }
+
+    .modal-stat {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 12px 16px;
+    }
+    .modal-stat-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; margin-bottom: 4px; }
+    .modal-stat-value { font-size: 20px; font-weight: 700; }
+
+    .summary-box {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 14px 16px;
+      font-size: 13px;
+      line-height: 1.6;
+      color: var(--text);
+      margin-bottom: 16px;
+    }
+
+    .flags-list { margin-bottom: 16px; }
+    .flag-item {
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 12px;
+      background: #2a0000;
+      border: 1px solid #4a0000;
+      border-radius: 6px;
+      font-size: 12px;
+      color: var(--red);
+      margin-bottom: 6px;
+    }
+    .rec-item {
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 12px;
+      background: #0d2718;
+      border: 1px solid #1a4a2a;
+      border-radius: 6px;
+      font-size: 12px;
+      color: var(--green);
+      margin-bottom: 6px;
+    }
+
+    .section-label {
+      font-size: 11px; text-transform: uppercase; letter-spacing: .5px;
+      color: var(--muted); font-weight: 600; margin-bottom: 8px; margin-top: 16px;
+    }
+
+    /* ── Loading / error ── */
+    .loader-wrap {
+      display: flex; flex-direction: column; align-items: center;
+      justify-content: center; min-height: 60vh; gap: 16px; color: var(--muted);
+    }
+    .loader {
+      width: 36px; height: 36px;
+      border: 3px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin .8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .empty-state {
+      text-align: center; padding: 60px 20px; color: var(--muted);
+    }
+    .empty-state h2 { color: var(--text); font-size: 18px; margin-bottom: 8px; }
+
+    /* ── Tooltips ── */
+    [title] { cursor: help; }
+
+    /* ── Percentile bar ── */
+    .percentile-bar {
+      width: 100%; height: 4px;
+      background: var(--bg3); border-radius: 2px;
+      margin-top: 8px; overflow: hidden;
+    }
+    .percentile-fill { height: 100%; border-radius: 2px; background: var(--accent); }
+
+    /* ── Scrollbar ── */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: var(--bg2); }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">HireIQ <span>/ Proctoring</span></div>
+  <div class="sep"></div>
+  <div class="header-meta" id="recruiter-label">Loading…</div>
+  <div class="header-meta" style="margin-left:16px;" id="generated-at"></div>
+</header>
+
+<main id="app">
+  <div class="loader-wrap">
+    <div class="loader"></div>
+    <div>Loading interview analytics…</div>
+  </div>
+</main>
+
+<!-- Candidate detail modal -->
+<div class="modal-overlay" id="modal-overlay" onclick="closeModal(event)">
+  <div class="modal" id="modal-body"></div>
+</div>
+
+<script>
+// ─────────────────────────────────────────────────────
+//  Config
+// ─────────────────────────────────────────────────────
+const RECRUITER_ID = new URLSearchParams(location.search).get('recruiter') || '';
+const API_BASE     = '/portal';   // portal sub-app mounted at /portal
+
+const RISK_COLORS = {
+  low:      '#3fb950',
+  medium:   '#d29922',
+  high:     '#e3b341',
+  critical: '#f85149',
+  pending:  '#8b949e',
+};
+
+const EVENT_ICONS = {
+  tab_hidden:     '🔺',
+  tab_visible:    '🔽',
+  window_blur:    '👁️',
+  window_focus:   '✅',
+  paste_detected: '📋',
+  large_paste:    '⚠️',
+  copy_detected:  '📄',
+  cursor_left:    '🖱️',
+  rapid_input:    '⚡',
+  devtools:       '🛠️',
+  session_start:  '▶',
+  session_end:    '⏹',
+};
+
+// ─────────────────────────────────────────────────────
+//  Fetch & render
+// ─────────────────────────────────────────────────────
+let _data = null;
+let _sortCol = 'rank';
+let _sortAsc  = true;
+
+async function loadData() {
+  try {
+    const resp = await fetch(`${API_BASE}/proctor/dashboard/${RECRUITER_ID}/data`);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const json = await resp.json();
+    _data = json.data;
+    render(_data);
+  } catch (e) {
+    document.getElementById('app').innerHTML = `
+      <div class="empty-state">
+        <h2>No data yet</h2>
+        <p>No proctoring sessions found for recruiter <strong>${RECRUITER_ID}</strong>.<br>
+        Sessions will appear here after candidates complete DSA interviews.</p>
+      </div>`;
+  }
+}
+
+function render(data) {
+  const app = document.getElementById('app');
+
+  document.getElementById('recruiter-label').innerHTML =
+    `Recruiter: <strong>${RECRUITER_ID}</strong>`;
+  document.getElementById('generated-at').textContent =
+    `Updated: ${new Date().toLocaleTimeString()}`;
+
+  const candidates = data.candidates || [];
+  const avgScore   = data.average_score || 0;
+  const flagged    = data.flagged_sessions || 0;
+  const total      = data.total_sessions || 0;
+
+  app.innerHTML = `
+    <!-- Summary cards -->
+    <h1>Proctoring Analytics</h1>
+    <p class="sub">Post-interview integrity analysis across all DSA sessions</p>
+
+    <div class="cards">
+      <div class="card blue">
+        <div class="card-label">Total Sessions</div>
+        <div class="card-value">${total}</div>
+        <div class="card-sub">candidates interviewed</div>
+      </div>
+      <div class="card green">
+        <div class="card-label">Avg Code Score</div>
+        <div class="card-value">${avgScore.toFixed(1)}%</div>
+        <div class="card-sub">across all submissions</div>
+      </div>
+      <div class="card ${flagged > 0 ? 'red' : 'green'}">
+        <div class="card-label">Flagged Sessions</div>
+        <div class="card-value">${flagged}</div>
+        <div class="card-sub">high / critical risk</div>
+      </div>
+      <div class="card yellow">
+        <div class="card-label">Clean Sessions</div>
+        <div class="card-value">${total - flagged}</div>
+        <div class="card-sub">low / medium risk</div>
+      </div>
+    </div>
+
+    <!-- Charts -->
+    <div class="section">
+      <div class="section-title"><span class="dot"></span> Analytics Overview</div>
+      <div class="charts-row">
+        <div class="chart-card">
+          <div class="chart-title">Risk Distribution</div>
+          <div class="chart-wrap"><canvas id="chartRisk"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-title">Code Scores</div>
+          <div class="chart-wrap"><canvas id="chartScores"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-title">Tab Switches per Candidate</div>
+          <div class="chart-wrap"><canvas id="chartTabs"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Candidate table -->
+    <div class="section">
+      <div class="section-title"><span class="dot"></span> Candidate Breakdown</div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th onclick="sortBy('rank')" id="th-rank">
+                Rank <span class="sort-icon">↕</span>
+              </th>
+              <th onclick="sortBy('applicant_name')" id="th-name">
+                Candidate <span class="sort-icon">↕</span>
+              </th>
+              <th onclick="sortBy('code_score_pct')" id="th-score">
+                Code Score <span class="sort-icon">↕</span>
+              </th>
+              <th onclick="sortBy('risk_score')" id="th-risk">
+                Risk <span class="sort-icon">↕</span>
+              </th>
+              <th onclick="sortBy('tab_switch_count')" id="th-tabs">
+                Tab Switches <span class="sort-icon">↕</span>
+              </th>
+              <th onclick="sortBy('total_away_time_ms')" id="th-away">
+                Away Time <span class="sort-icon">↕</span>
+              </th>
+              <th onclick="sortBy('suspicious_paste_count')" id="th-paste">
+                Large Pastes <span class="sort-icon">↕</span>
+              </th>
+              <th>Red Flags</th>
+              <th>Percentile</th>
+            </tr>
+          </thead>
+          <tbody id="cand-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  `;
+
+  renderTable(candidates);
+  renderCharts(candidates);
+}
+
+// ─────────────────────────────────────────────────────
+//  Table
+// ─────────────────────────────────────────────────────
+function renderTable(candidates) {
+  const tbody = document.getElementById('cand-tbody');
+  if (!candidates.length) {
+    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:40px;color:var(--muted);">No sessions yet</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = candidates.map((c, i) => {
+    const rankClass = i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : '';
+    const rank = c.rank ?? (i + 1);
+    const score = c.code_score_pct ?? 0;
+    const risk = c.risk_level || 'pending';
+    const tabs = c.tab_switch_count ?? 0;
+    const awayMin = ((c.total_away_time_ms || 0) / 60000).toFixed(1);
+    const pastes = c.suspicious_paste_count ?? 0;
+    const flags = (c.red_flags || []).length;
+    const pct = c.percentile ?? 0;
+
+    const barColor = score >= 80 ? '#3fb950' : score >= 50 ? '#d29922' : '#f85149';
+
+    return `
+      <tr onclick="openModal(${i})">
+        <td><span class="rank-badge ${rankClass}">#${rank}</span></td>
+        <td>
+          <div style="font-weight:600;">${escHtml(c.applicant_name)}</div>
+          <div style="font-size:11px;color:var(--muted);font-family:var(--font-mono);">${c.applicant_id.slice(0,14)}</div>
+        </td>
+        <td>
+          <div class="score-bar-wrap">
+            <div class="score-bar">
+              <div class="score-bar-fill" style="width:${score}%;background:${barColor};"></div>
+            </div>
+            <span class="score-val" style="color:${barColor};">${score.toFixed(0)}%</span>
+          </div>
+        </td>
+        <td><span class="risk-pill risk-${risk}">${risk}</span></td>
+        <td>
+          <span style="font-weight:600;color:${tabs>=5?'var(--red)':tabs>=2?'var(--yellow)':'var(--text)'}">
+            ${tabs}
+          </span>
+        </td>
+        <td style="font-family:var(--font-mono);color:${parseFloat(awayMin)>5?'var(--red)':parseFloat(awayMin)>2?'var(--yellow)':'var(--muted)'}">
+          ${awayMin}m
+        </td>
+        <td>
+          <span style="color:${pastes>=2?'var(--red)':pastes>=1?'var(--orange)':'var(--muted)'}">
+            ${pastes}
+          </span>
+        </td>
+        <td>
+          <span class="flag-count ${flags > 0 ? 'has-flags' : ''}">
+            ${flags > 0 ? '🚩' : '✓'} ${flags} flag${flags !== 1 ? 's' : ''}
+          </span>
+        </td>
+        <td>
+          <div style="font-size:12px;color:var(--accent);font-weight:600;">${pct.toFixed(0)}th</div>
+          <div class="percentile-bar">
+            <div class="percentile-fill" style="width:${pct}%;"></div>
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+// ─────────────────────────────────────────────────────
+//  Sorting
+// ─────────────────────────────────────────────────────
+function sortBy(col) {
+  if (_sortCol === col) {
+    _sortAsc = !_sortAsc;
+  } else {
+    _sortCol = col;
+    _sortAsc = col === 'applicant_name';
+  }
+
+  document.querySelectorAll('th[id]').forEach(th => th.classList.remove('sorted'));
+  const th = document.getElementById(`th-${col.replace('_count','').replace('_pct','').replace('total_away_time_ms','away').replace('suspicious_paste','paste')}`);
+  if (th) th.classList.add('sorted');
+
+  const sorted = [...(_data.candidates || [])].sort((a, b) => {
+    let va = a[col] ?? 0;
+    let vb = b[col] ?? 0;
+    if (typeof va === 'string') va = va.toLowerCase();
+    if (typeof vb === 'string') vb = vb.toLowerCase();
+    return _sortAsc ? (va < vb ? -1 : va > vb ? 1 : 0) : (va > vb ? -1 : va < vb ? 1 : 0);
+  });
+  renderTable(sorted);
+}
+
+// ─────────────────────────────────────────────────────
+//  Charts
+// ─────────────────────────────────────────────────────
+function renderCharts(candidates) {
+  // Risk distribution donut
+  const riskCounts = { low: 0, medium: 0, high: 0, critical: 0, pending: 0 };
+  candidates.forEach(c => { riskCounts[c.risk_level || 'pending']++; });
+
+  new Chart(document.getElementById('chartRisk'), {
+    type: 'doughnut',
+    data: {
+      labels: ['Low', 'Medium', 'High', 'Critical', 'Pending'],
+      datasets: [{
+        data: [riskCounts.low, riskCounts.medium, riskCounts.high, riskCounts.critical, riskCounts.pending],
+        backgroundColor: ['#3fb950', '#d29922', '#e3b341', '#f85149', '#30363d'],
+        borderColor: '#161b22',
+        borderWidth: 2,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          position: 'bottom',
+          labels: { color: '#8b949e', font: { size: 11 }, boxWidth: 12, padding: 10 },
+        },
+      },
+      cutout: '65%',
+    },
+  });
+
+  // Code scores bar chart
+  const names  = candidates.map(c => c.applicant_name.split(' ')[0]);
+  const scores = candidates.map(c => c.code_score_pct || 0);
+  const scoreColors = scores.map(s => s >= 80 ? '#3fb950' : s >= 50 ? '#d29922' : '#f85149');
+
+  new Chart(document.getElementById('chartScores'), {
+    type: 'bar',
+    data: {
+      labels: names,
+      datasets: [{
+        label: 'Code Score %',
+        data: scores,
+        backgroundColor: scoreColors,
+        borderRadius: 4,
+        borderSkipped: false,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: {
+          ticks: { color: '#8b949e', font: { size: 10 } },
+          grid:  { color: '#21262d' },
+        },
+        y: {
+          min: 0, max: 100,
+          ticks: { color: '#8b949e', font: { size: 10 }, callback: v => v + '%' },
+          grid:  { color: '#21262d' },
+        },
+      },
+    },
+  });
+
+  // Tab switches horizontal bar
+  const tabCounts = candidates.map(c => c.tab_switch_count || 0);
+  const tabColors = tabCounts.map(t => t >= 5 ? '#f85149' : t >= 2 ? '#d29922' : '#58a6ff');
+
+  new Chart(document.getElementById('chartTabs'), {
+    type: 'bar',
+    data: {
+      labels: names,
+      datasets: [{
+        label: 'Tab Switches',
+        data: tabCounts,
+        backgroundColor: tabColors,
+        borderRadius: 4,
+        borderSkipped: false,
+      }],
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: {
+          ticks: { color: '#8b949e', font: { size: 10 } },
+          grid:  { color: '#21262d' },
+        },
+        y: {
+          ticks: { color: '#8b949e', font: { size: 10 } },
+          grid:  { color: '#21262d' },
+        },
+      },
+    },
+  });
+}
+
+// ─────────────────────────────────────────────────────
+//  Detail modal
+// ─────────────────────────────────────────────────────
+function openModal(idx) {
+  const candidates = _data.candidates || [];
+  const c = candidates[idx];
+  if (!c) return;
+
+  const risk   = c.risk_level || 'pending';
+  const score  = (c.code_score_pct || 0).toFixed(1);
+  const awayMs = c.total_away_time_ms || 0;
+  const awayMin = (awayMs / 60000).toFixed(1);
+  const dur    = ((c.session_duration_ms || 0) / 60000).toFixed(0);
+  const flags  = c.red_flags || [];
+  const recs   = c.recommendations || [];
+  const events = c.events || [];
+
+  const modal = document.getElementById('modal-body');
+  modal.innerHTML = `
+    <div class="modal-header">
+      <div>
+        <div class="modal-title">${escHtml(c.applicant_name)}</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:4px;font-family:var(--font-mono);">
+          ${c.session_id} · Rank #${c.rank ?? '—'} of ${c.total_candidates ?? '—'}
+        </div>
+      </div>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+
+    <div class="modal-grid">
+      <div class="modal-stat">
+        <div class="modal-stat-label">Code Score</div>
+        <div class="modal-stat-value" style="color:${score>=80?'var(--green)':score>=50?'var(--yellow)':'var(--red)'}">${score}%</div>
+      </div>
+      <div class="modal-stat">
+        <div class="modal-stat-label">Integrity Risk</div>
+        <div class="modal-stat-value" style="color:${RISK_COLORS[risk] || 'var(--muted)'}">
+          ${(c.risk_score || 0).toFixed(0)}/100
+          <span style="font-size:14px;margin-left:6px;"><span class="risk-pill risk-${risk}">${risk}</span></span>
+        </div>
+      </div>
+      <div class="modal-stat">
+        <div class="modal-stat-label">Tab Switches</div>
+        <div class="modal-stat-value" style="color:var(--yellow)">${c.tab_switch_count ?? 0}</div>
+      </div>
+      <div class="modal-stat">
+        <div class="modal-stat-label">Away From Window</div>
+        <div class="modal-stat-value" style="color:var(--orange)">${awayMin}m</div>
+      </div>
+      <div class="modal-stat">
+        <div class="modal-stat-label">Large Pastes</div>
+        <div class="modal-stat-value" style="color:var(--red)">${c.suspicious_paste_count ?? 0}</div>
+      </div>
+      <div class="modal-stat">
+        <div class="modal-stat-label">Session Duration</div>
+        <div class="modal-stat-value">${dur}m</div>
+      </div>
+    </div>
+
+    ${c.behavioral_summary ? `
+    <div class="section-label">Behavioural Summary</div>
+    <div class="summary-box">${escHtml(c.behavioral_summary)}</div>
+    ` : ''}
+
+    ${flags.length ? `
+    <div class="section-label">Red Flags</div>
+    <div class="flags-list">
+      ${flags.map(f => `<div class="flag-item">🚩 ${escHtml(f)}</div>`).join('')}
+    </div>
+    ` : '<div class="rec-item" style="margin-bottom:12px;">✅ No significant red flags detected</div>'}
+
+    ${recs.length ? `
+    <div class="section-label">Recruiter Recommendations</div>
+    <div class="flags-list">
+      ${recs.map(r => `<div class="rec-item">💡 ${escHtml(r)}</div>`).join('')}
+    </div>
+    ` : ''}
+
+    <div class="section-label">Event Timeline (${events.length} events)</div>
+    <div class="timeline">
+      ${events.length === 0
+        ? '<div style="color:var(--muted);font-size:12px;padding:8px;">No events recorded</div>'
+        : events.map(ev => {
+          const icon   = EVENT_ICONS[ev.event_type] || '•';
+          const label  = ev.event_type.replace(/_/g, ' ');
+          const ts     = ev.timestamp ? new Date(ev.timestamp).toLocaleTimeString() : '';
+          const away   = ev.duration_away_ms ? ` · away ${(ev.duration_away_ms/1000).toFixed(1)}s` : '';
+          const detail = ev.detail ? `<div class="ev-detail">${escHtml(ev.detail)}</div>` : '';
+          const paste  = ev.paste_length ? `<div class="ev-detail">${ev.paste_length} chars pasted</div>` : '';
+          return `
+            <div class="timeline-event ${ev.event_type}">
+              <span class="ev-icon">${icon}</span>
+              <div class="ev-body">
+                <div class="ev-type">${label}</div>
+                <div class="ev-time">${ts}${away}</div>
+                ${detail}${paste}
+              </div>
+            </div>
+          `;
+        }).join('')
+      }
+    </div>
+  `;
+
+  document.getElementById('modal-overlay').classList.add('open');
+}
+
+function closeModal(e) {
+  if (!e || e.target === document.getElementById('modal-overlay')) {
+    document.getElementById('modal-overlay').classList.remove('open');
+  }
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') document.getElementById('modal-overlay').classList.remove('open');
+});
+
+// ─────────────────────────────────────────────────────
+//  Helpers
+// ─────────────────────────────────────────────────────
+function escHtml(s) {
+  return String(s)
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;');
+}
+
+// ─────────────────────────────────────────────────────
+//  Boot
+// ─────────────────────────────────────────────────────
+loadData();
+
+// Auto-refresh every 60 seconds
+setInterval(loadData, 60_000);
+</script>
+</body>
+</html>

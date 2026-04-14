@@ -275,9 +275,16 @@ class InterviewPipeline:
     async def start_interview(
         self,
         applicant: Applicant,
+        custom_questions: list[str] | None = None,
     ) -> tuple[str, str]:
         """
         Start an interview session for a live portal interaction.
+
+        Args:
+            applicant         — full applicant profile
+            custom_questions  — optional list of recruiter-supplied questions to
+                                ask verbatim before falling back to Groq generation.
+                                Built from RecruiterInterviewConfig by the caller.
 
         Returns:
             (session_id, first_question_text)
@@ -286,7 +293,10 @@ class InterviewPipeline:
         first_question to the applicant and then call
         process_interview_response() with each answer.
         """
-        session, first_question = await self.interviewer.start_session(applicant)
+        session, first_question = await self.interviewer.start_session(
+            applicant,
+            custom_questions=custom_questions,
+        )
         self.session_store.create_session(session)
         log_interview_event(session.session_id, "Live session started", applicant.full_name)
         return session.session_id, first_question
